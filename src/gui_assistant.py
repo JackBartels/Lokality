@@ -19,8 +19,8 @@ class AssistantGUI:
         # --- THEME & COLORS ---
         self.BG_COLOR = "#212121"       # Dark Grey
         self.FG_COLOR = "#ECECEC"       # Off-white
-        self.ACCENT_COLOR = "#546E7A"   # Blue Grey
-        self.COMMAND_COLOR = "#00E5FF"  # Bright Cyan
+        self.ACCENT_COLOR = "#617D62"   # Duller/Muted Sage Green (Top border)
+        self.COMMAND_COLOR = "#4CAF50"  # Brighter/Vibrant Green (Slash commands/Bottom border)
         self.INPUT_BG = "#303030"       # Slightly lighter grey for inputs
         self.BUTTON_FG = "#FFFFFF"
 
@@ -49,13 +49,21 @@ class AssistantGUI:
         root.grid_rowconfigure(0, weight=1)
         root.grid_columnconfigure(0, weight=1)
 
-        # Chat display area container
-        chat_container = tk.Frame(root, bg=self.BG_COLOR)
-        chat_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        chat_container.grid_rowconfigure(0, weight=1)
-        chat_container.grid_columnconfigure(0, weight=1)
+        # Chat display area container (Rounded with 6px border)
+        self.chat_canvas = tk.Canvas(root, bg=self.BG_COLOR, highlightthickness=0)
+        self.chat_canvas.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        
+        self.chat_bg_id = self.round_rectangle(self.chat_canvas, 4, 4, 10, 10, radius=25, 
+                                               outline=self.ACCENT_COLOR, width=6, fill=self.BG_COLOR)
+        
+        # Inner container for the actual text widget and scrollbar
+        self.chat_inner = tk.Frame(self.chat_canvas, bg=self.BG_COLOR)
+        self.chat_window_id = self.chat_canvas.create_window(10, 10, anchor="nw", window=self.chat_inner)
+        
+        self.chat_inner.grid_rowconfigure(0, weight=1)
+        self.chat_inner.grid_columnconfigure(0, weight=1)
 
-        self.chat_display = tk.Text(chat_container, 
+        self.chat_display = tk.Text(self.chat_inner, 
                                     state='disabled', 
                                     wrap='word', 
                                     font=self.base_font,
@@ -67,14 +75,16 @@ class AssistantGUI:
                                     padx=15, pady=15)
         self.chat_display.grid(row=0, column=0, sticky="nsew")
 
-        self.scrollbar = CustomScrollbar(chat_container, command=self.chat_display.yview, bg=self.BG_COLOR)
+        self.scrollbar = CustomScrollbar(self.chat_inner, command=self.chat_display.yview, bg=self.BG_COLOR)
         self.scrollbar.grid(row=0, column=1, sticky="ns", pady=15)
         self.chat_display.config(yscrollcommand=self.scrollbar.set)
+        
+        self.chat_canvas.bind("<Configure>", self.on_chat_canvas_configure)
         
         # Tags for Coloring & Markdown
         self.chat_display.tag_config("user", foreground="#81D4FA", font=self.bold_font) 
         self.chat_display.tag_config("assistant", foreground="#ECECEC", font=self.base_font) 
-        self.chat_display.tag_config("system", foreground="#B0BEC5", font=self.small_font) 
+        self.chat_display.tag_config("system", foreground="#B0BEC5", font=self.small_font, tabs=("240",)) 
         self.chat_display.tag_config("error", foreground="#EF9A9A") 
         
         # Markdown specific tags
@@ -97,18 +107,19 @@ class AssistantGUI:
         self.full_current_response = ""
         self.tooltip_window = None
 
-        # Input Area Container
-        input_container = tk.Frame(root, bg=self.BG_COLOR)
-        input_container.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 20))
-        input_container.grid_columnconfigure(0, weight=1)
+        # Input Area Container (Rounded with 6px COMMAND_COLOR border)
+        self.lower_canvas = tk.Canvas(root, bg=self.BG_COLOR, highlightthickness=0)
+        self.lower_canvas.grid(row=1, column=0, sticky="ew", padx=10, pady=(25, 20))
+        
+        self.lower_bg_id = self.round_rectangle(self.lower_canvas, 4, 4, 10, 10, radius=20, 
+                                               outline=self.COMMAND_COLOR, width=6, fill=self.INPUT_BG)
+        
+        self.lower_inner = tk.Frame(self.lower_canvas, bg=self.INPUT_BG)
+        self.lower_window_id = self.lower_canvas.create_window(5, 5, anchor="nw", window=self.lower_inner)
+        self.lower_inner.grid_columnconfigure(0, weight=1)
+        self.lower_inner.grid_rowconfigure(0, weight=1)
 
-        # Custom Rounded Input Field using Canvas (Increased Height)
-        self.input_canvas = tk.Canvas(input_container, bg=self.BG_COLOR, height=100, highlightthickness=0)
-        self.input_canvas.grid(row=0, column=0, sticky="ew")
-        
-        self.input_bg_id = self.round_rectangle(self.input_canvas, 0, 0, 0, 0, radius=25, fill=self.INPUT_BG)
-        
-        self.input_field = tk.Text(self.input_canvas, 
+        self.input_field = tk.Text(self.lower_inner, 
                                    height=1, 
                                    wrap='word', 
                                    font=self.base_font,
@@ -116,28 +127,16 @@ class AssistantGUI:
                                    fg=self.FG_COLOR,
                                    insertbackground=self.FG_COLOR,
                                    borderwidth=0, 
-                                   highlightthickness=0)
-        
-        # Window in canvas
-        self.input_window = self.input_canvas.create_window(20, 20, anchor="nw", window=self.input_field)
+                                   highlightthickness=0,
+                                   padx=0, pady=0)
+        self.input_field.grid(row=0, column=0, sticky="nsew", padx=15, pady=10)
         
         self.input_field.bind("<Tab>", self.handle_tab)
         self.input_field.bind("<Return>", self.handle_return)
         self.input_field.bind("<KeyRelease>", self.on_key_release)
-        self.input_canvas.bind("<Configure>", self.on_input_canvas_configure)
-        self.input_canvas.bind("<Button-1>", lambda e: self.input_field.focus_set())
+        self.lower_canvas.bind("<Button-1>", lambda e: self.input_field.focus_set())
 
-        # Custom Rounded Send Button (Increased Size)
-        self.button_canvas = tk.Canvas(input_container, bg=self.BG_COLOR, width=100, height=100, highlightthickness=0)
-        self.button_canvas.grid(row=0, column=1, sticky="s", padx=(12, 0))
-        
-        self.btn_bg_id = self.round_rectangle(self.button_canvas, 0, 0, 100, 100, radius=25, fill=self.ACCENT_COLOR)
-        self.btn_text_id = self.button_canvas.create_text(50, 50, text="Send", fill=self.BUTTON_FG, font=("Roboto", 11, "bold"))
-        
-        self.button_canvas.bind("<ButtonPress-1>", self.on_btn_press)
-        self.button_canvas.bind("<ButtonRelease-1>", self.on_btn_release)
-        self.button_canvas.bind("<Enter>", lambda e: self.button_canvas.itemconfig(self.btn_bg_id, fill="#78909C"))
-        self.button_canvas.bind("<Leave>", lambda e: self.button_canvas.itemconfig(self.btn_bg_id, fill=self.ACCENT_COLOR))
+        self.lower_canvas.bind("<Configure>", self.on_lower_canvas_configure)
 
         # Logic Setup
         self.assistant = local_assistant.LocalChatAssistant()
@@ -152,6 +151,9 @@ class AssistantGUI:
         # Input highlighting tag
         self.input_field.tag_config("command_highlight", foreground=self.COMMAND_COLOR)
         
+        # Force initial height adjustment
+        self.adjust_input_height()
+        
         # Redirect Stdout/Stderr
         sys.stdout = RedirectedStdout(self.msg_queue, "system")
         sys.stderr = RedirectedStdout(self.msg_queue, "error")
@@ -164,19 +166,37 @@ class AssistantGUI:
         points = [x1+radius, y1, x1+radius, y1, x2-radius, y1, x2-radius, y1, x2, y1, x2, y1+radius, x2, y1+radius, x2, y2-radius, x2, y2-radius, x2, y2, x2-radius, y2, x2-radius, y2, x1+radius, y2, x1+radius, y2, x1, y2, x1, y2-radius, x1, y2-radius, x1, y1+radius, x1, y1+radius, x1, y1]
         return canvas.create_polygon(points, **kwargs, smooth=True)
 
-    def on_input_canvas_configure(self, event):
+    def on_chat_canvas_configure(self, event):
         w, h = event.width, event.height
-        # Redraw
-        self.input_canvas.delete(self.input_bg_id)
-        self.input_bg_id = self.round_rectangle(self.input_canvas, 0, 0, w, h, radius=25, fill=self.INPUT_BG)
-        self.input_canvas.tag_lower(self.input_bg_id)
+        self.chat_canvas.delete(self.chat_bg_id)
+        # Offset to 4px for 6px border
+        self.chat_bg_id = self.round_rectangle(self.chat_canvas, 4, 4, w-4, h-4, radius=25, 
+                                               outline=self.ACCENT_COLOR, width=6, fill=self.BG_COLOR)
+        self.chat_canvas.tag_lower(self.chat_bg_id)
         
-        # Centering the text window
-        line_height = font.Font(font=self.input_field['font']).metrics('linespace')
-        num_lines = int(self.input_field.index('end-1c').split('.')[0])
-        text_h = num_lines * line_height
-        self.input_canvas.itemconfig(self.input_window, width=w-40)
-        self.input_canvas.coords(self.input_window, 20, (h - text_h) / 2)
+        # Resize inner window and provide enough padding to avoid clipping at corners
+        pad = 12 
+        self.chat_canvas.itemconfig(self.chat_window_id, width=w-(pad*2), height=h-(pad*2))
+        self.chat_canvas.coords(self.chat_window_id, pad, pad)
+
+    def on_lower_canvas_configure(self, event):
+        self.update_lower_border()
+
+    def update_lower_border(self):
+        w = self.lower_canvas.winfo_width()
+        h = self.lower_canvas.winfo_height()
+        if w < 10 or h < 10: return
+        self.lower_canvas.delete(self.lower_bg_id)
+        # Offset to 4 to ensure 6px border is fully inside and not clipped
+        self.lower_bg_id = self.round_rectangle(self.lower_canvas, 4, 4, w-4, h-4, radius=20, 
+                                               outline=self.COMMAND_COLOR, width=6, fill=self.INPUT_BG)
+        self.lower_canvas.tag_lower(self.lower_bg_id)
+        
+        # Window offset at 8,8 to be inside the 6px border
+        pad_x = 8
+        pad_y = 8
+        self.lower_canvas.itemconfig(self.lower_window_id, width=w-(pad_x*2), height=h-(pad_y*2))
+        self.lower_canvas.coords(self.lower_window_id, pad_x, pad_y)
 
     def on_key_release(self, event=None):
         self.adjust_input_height(event)
@@ -213,36 +233,17 @@ class AssistantGUI:
         
         # Adjust canvas height
         line_height = font.Font(font=self.input_field['font']).metrics('linespace')
-        # Reduced padding to make text field occupy more relative space
-        total_height = (new_height * line_height) + 40
-        if total_height < 70: total_height = 70 # Minimum height
+        # pady=10 in grid + 8px canvas window offset = 18px top/bottom
+        total_height = (new_height * line_height) + 36
         
-        self.input_canvas.config(height=total_height)
-        
-        # Re-center the window vertically
-        self.input_canvas.coords(self.input_window, 20, (total_height - (new_height * line_height)) / 2)
-        
-        # Resize button canvas to match
-        self.button_canvas.config(height=total_height)
-        self.redraw_button(100, total_height)
-
-    def redraw_button(self, w, h):
-        self.button_canvas.delete("all")
-        self.btn_bg_id = self.round_rectangle(self.button_canvas, 0, 0, w, h, radius=25, fill=self.ACCENT_COLOR)
-        self.btn_text_id = self.button_canvas.create_text(w/2, h/2, text="Send", fill=self.BUTTON_FG, font=("Roboto", 11, "bold"))
-        
-        # Re-bind events since we deleted "all"
-        self.button_canvas.bind("<ButtonPress-1>", self.on_btn_press)
-        self.button_canvas.bind("<ButtonRelease-1>", self.on_btn_release)
-        self.button_canvas.bind("<Enter>", lambda e: self.button_canvas.itemconfig(self.btn_bg_id, fill="#78909C"))
-        self.button_canvas.bind("<Leave>", lambda e: self.button_canvas.itemconfig(self.btn_bg_id, fill=self.ACCENT_COLOR))
+        self.lower_canvas.config(height=total_height)
+        self.update_lower_border()
 
     def on_btn_press(self, event):
-        self.button_canvas.itemconfig(self.btn_bg_id, fill="#455A64")
+        pass
 
     def on_btn_release(self, event):
-        self.button_canvas.itemconfig(self.btn_bg_id, fill=self.ACCENT_COLOR)
-        self.send_message()
+        pass
 
     def handle_return(self, event):
         if not event.state & 0x1: # Shift not held
@@ -279,8 +280,7 @@ class AssistantGUI:
                 self.msg_queue.put(("enable", None, None))
                 return
             if user_input.lower() == '/help':
-                max_len = max(len(cmd[0]) for cmd in self.SLASH_COMMANDS)
-                help_text = "Available Commands:\n" + "\n".join([f"  {cmd.ljust(max_len + 4)} {desc}" for cmd, desc in self.SLASH_COMMANDS])
+                help_text = "Available Commands:\n" + "\n".join([f"  {cmd}\t{desc}" for cmd, desc in self.SLASH_COMMANDS])
                 print(help_text)
                 self.msg_queue.put(("enable", None, None))
                 return
