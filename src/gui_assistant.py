@@ -20,6 +20,7 @@ class AssistantGUI:
         self.BG_COLOR = "#212121"       # Dark Grey
         self.FG_COLOR = "#ECECEC"       # Off-white
         self.ACCENT_COLOR = "#546E7A"   # Blue Grey
+        self.COMMAND_COLOR = "#00E5FF"  # Bright Cyan
         self.INPUT_BG = "#303030"       # Slightly lighter grey for inputs
         self.BUTTON_FG = "#FFFFFF"
 
@@ -38,7 +39,7 @@ class AssistantGUI:
         self.base_font = ("Roboto", 11)
         self.bold_font = ("Roboto", 11, "bold")
         self.italic_font = ("Roboto", 11, "italic")
-        self.small_font = ("Roboto", 9, "italic")
+        self.small_font = ("Roboto", 10, "italic")
         self.code_font = ("Consolas", 10) if sys.platform == "win32" else ("Monospace", 10)
         self.h1_font = ("Roboto", 16, "bold")
         self.h2_font = ("Roboto", 14, "bold")
@@ -120,8 +121,9 @@ class AssistantGUI:
         # Window in canvas
         self.input_window = self.input_canvas.create_window(20, 20, anchor="nw", window=self.input_field)
         
+        self.input_field.bind("<Tab>", self.handle_tab)
         self.input_field.bind("<Return>", self.handle_return)
-        self.input_field.bind("<KeyRelease>", self.adjust_input_height)
+        self.input_field.bind("<KeyRelease>", self.on_key_release)
         self.input_canvas.bind("<Configure>", self.on_input_canvas_configure)
         self.input_canvas.bind("<Button-1>", lambda e: self.input_field.focus_set())
 
@@ -140,6 +142,15 @@ class AssistantGUI:
         # Logic Setup
         self.assistant = local_assistant.LocalChatAssistant()
         self.msg_queue = queue.Queue()
+        self.SLASH_COMMANDS = [
+            ["/help", "Show this help message"],
+            ["/clear", "Clear conversation history"],
+            ["/clear-long-term", "Reset long-term memory"],
+            ["/exit", "Exit the application"]
+        ]
+        
+        # Input highlighting tag
+        self.input_field.tag_config("command_highlight", foreground=self.COMMAND_COLOR)
         
         # Redirect Stdout/Stderr
         sys.stdout = RedirectedStdout(self.msg_queue, "system")
@@ -147,7 +158,7 @@ class AssistantGUI:
 
         self.root.after(100, self.check_queue)
         
-        self.display_message("Type /help for commands.\n\n", "system")
+        self.display_message("Type /help for commands.\n", "system")
 
     def round_rectangle(self, canvas, x1, y1, x2, y2, radius=25, **kwargs):
         points = [x1+radius, y1, x1+radius, y1, x2-radius, y1, x2-radius, y1, x2, y1, x2, y1+radius, x2, y1+radius, x2, y2-radius, x2, y2-radius, x2, y2, x2-radius, y2, x2-radius, y2, x1+radius, y2, x1+radius, y2, x1, y2, x1, y2-radius, x1, y2-radius, x1, y1+radius, x1, y1+radius, x1, y1]
@@ -166,6 +177,32 @@ class AssistantGUI:
         text_h = num_lines * line_height
         self.input_canvas.itemconfig(self.input_window, width=w-40)
         self.input_canvas.coords(self.input_window, 20, (h - text_h) / 2)
+
+    def on_key_release(self, event=None):
+        self.adjust_input_height(event)
+        self.highlight_commands()
+
+    def highlight_commands(self):
+        self.input_field.tag_remove("command_highlight", "1.0", tk.END)
+        content = self.input_field.get("1.0", tk.END).strip()
+        if content.startswith("/"):
+            # Check if it matches exactly any of the commands
+            first_word = content.split()[0] if content.split() else ""
+            if any(first_word == cmd[0] for cmd in self.SLASH_COMMANDS):
+                end_index = f"1.{len(first_word)}"
+                self.input_field.tag_add("command_highlight", "1.0", end_index)
+
+    def handle_tab(self, event):
+        content = self.input_field.get("1.0", tk.INSERT).strip()
+        if content.startswith("/"):
+            matches = [cmd[0] for cmd in self.SLASH_COMMANDS if cmd[0].startswith(content)]
+            if matches:
+                # If multiple matches, pick the shortest one
+                best_match = min(matches, key=len)
+                self.input_field.delete("1.0", tk.INSERT)
+                self.input_field.insert("1.0", best_match)
+                self.highlight_commands()
+            return "break"
 
     def adjust_input_height(self, event=None):
         # Calculate needed height
@@ -242,7 +279,9 @@ class AssistantGUI:
                 self.msg_queue.put(("enable", None, None))
                 return
             if user_input.lower() == '/help':
-                print("Available Commands:\n/help\n/clear\n/clear-long-term\n/exit")
+                max_len = max(len(cmd[0]) for cmd in self.SLASH_COMMANDS)
+                help_text = "Available Commands:\n" + "\n".join([f"  {cmd.ljust(max_len + 4)} {desc}" for cmd, desc in self.SLASH_COMMANDS])
+                print(help_text)
                 self.msg_queue.put(("enable", None, None))
                 return
 
@@ -394,7 +433,7 @@ class AssistantGUI:
         
         self.tooltip_window = tw = tk.Toplevel(self.root)
         tw.wm_overrideredirect(True) # Remove window decorations
-        tw.wm_geometry(f"+{x}+{y}")
+        tw.wm_geometry(f"{x}+{y}")
         
         label = tk.Label(tw, text=f"Ctrl + Click to open {url}", 
                          justify='left', background="#37474F", foreground="#ECECEC",
@@ -486,7 +525,7 @@ class AssistantGUI:
                 self.chat_display.config(state='normal')
                 self.chat_display.delete("1.0", tk.END)
                 self.chat_display.config(state='disabled')
-                self.display_message("Type /help for commands.\n\n", "system")
+                self.display_message("Type /help for commands.\n", "system")
                 self.full_current_response = ""
             elif action == "final_render":
                 self.display_message("", tag, final=True)
