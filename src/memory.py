@@ -89,3 +89,8 @@ class MemoryStore:
         with self._get_conn() as conn:
             conn.execute("DELETE FROM memory")
             conn.commit()
+
+    def get_fact_count(self):
+        with self._get_conn() as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM memory")
+            return cursor.fetchone()[0]

@@ -19,8 +19,9 @@ class AssistantGUI:
         # --- THEME & COLORS ---
         self.BG_COLOR = "#212121"       # Dark Grey
         self.FG_COLOR = "#ECECEC"       # Off-white
-        self.ACCENT_COLOR = "#546E7A"   # Blue Grey
-        self.COMMAND_COLOR = "#00E5FF"  # Bright Cyan
+        self.ACCENT_COLOR = "#6B728E"   # Cooler Blue-Purple (Top border)
+        self.COMMAND_COLOR = "#8B93B5"  # More Blue-toned Purple (Bottom border)
+        self.SLASH_COLOR = "#B3E5FC"    # Brighter version of user blue
         self.INPUT_BG = "#303030"       # Slightly lighter grey for inputs
         self.BUTTON_FG = "#FFFFFF"
 
@@ -39,7 +40,7 @@ class AssistantGUI:
         self.base_font = ("Roboto", 11)
         self.bold_font = ("Roboto", 11, "bold")
         self.italic_font = ("Roboto", 11, "italic")
-        self.small_font = ("Roboto", 10, "italic")
+        self.small_font = ("Roboto", 11, "italic")
         self.code_font = ("Consolas", 10) if sys.platform == "win32" else ("Monospace", 10)
         self.h1_font = ("Roboto", 16, "bold")
         self.h2_font = ("Roboto", 14, "bold")
@@ -49,13 +50,21 @@ class AssistantGUI:
         root.grid_rowconfigure(0, weight=1)
         root.grid_columnconfigure(0, weight=1)
 
-        # Chat display area container
-        chat_container = tk.Frame(root, bg=self.BG_COLOR)
-        chat_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        chat_container.grid_rowconfigure(0, weight=1)
-        chat_container.grid_columnconfigure(0, weight=1)
+        # Chat display area container (Rounded with 6px border)
+        self.chat_canvas = tk.Canvas(root, bg=self.BG_COLOR, highlightthickness=0)
+        self.chat_canvas.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 7))
+        
+        self.chat_bg_id = self.round_rectangle(self.chat_canvas, 4, 4, 10, 10, radius=25, 
+                                               outline=self.ACCENT_COLOR, width=6, fill=self.BG_COLOR)
+        
+        # Inner container for the actual text widget and scrollbar
+        self.chat_inner = tk.Frame(self.chat_canvas, bg=self.BG_COLOR)
+        self.chat_window_id = self.chat_canvas.create_window(10, 10, anchor="nw", window=self.chat_inner)
+        
+        self.chat_inner.grid_rowconfigure(0, weight=1)
+        self.chat_inner.grid_columnconfigure(0, weight=1)
 
-        self.chat_display = tk.Text(chat_container, 
+        self.chat_display = tk.Text(self.chat_inner, 
                                     state='disabled', 
                                     wrap='word', 
                                     font=self.base_font,
@@ -67,17 +76,20 @@ class AssistantGUI:
                                     padx=15, pady=15)
         self.chat_display.grid(row=0, column=0, sticky="nsew")
 
-        self.scrollbar = CustomScrollbar(chat_container, command=self.chat_display.yview, bg=self.BG_COLOR)
+        self.scrollbar = CustomScrollbar(self.chat_inner, command=self.chat_display.yview, bg=self.BG_COLOR)
         self.scrollbar.grid(row=0, column=1, sticky="ns", pady=15)
         self.chat_display.config(yscrollcommand=self.scrollbar.set)
         
+        self.chat_canvas.bind("<Configure>", self.on_chat_canvas_configure)
+        
         # Tags for Coloring & Markdown
-        self.chat_display.tag_config("user", foreground="#81D4FA", font=self.bold_font) 
+        self.chat_display.tag_config("user", foreground="#90CAF9", font=self.bold_font) 
         self.chat_display.tag_config("assistant", foreground="#ECECEC", font=self.base_font) 
-        self.chat_display.tag_config("system", foreground="#B0BEC5", font=self.small_font) 
+        self.chat_display.tag_config("system", foreground="#B0BEC5", font=self.small_font, tabs=("240",)) 
         self.chat_display.tag_config("error", foreground="#EF9A9A") 
         
-        # Markdown specific tags
+        # Balanced line spacing: spacing2 adds space between wrapped lines
+        self.chat_display.config(spacing1=1, spacing2=3, spacing3=1)
         self.chat_display.tag_config("md_bold", font=self.bold_font)
         self.chat_display.tag_config("md_italic", font=self.italic_font)
         self.chat_display.tag_config("md_code", font=self.code_font, background="#2D2D2D", foreground="#F8F8F2")
@@ -97,18 +109,58 @@ class AssistantGUI:
         self.full_current_response = ""
         self.tooltip_window = None
 
-        # Input Area Container
-        input_container = tk.Frame(root, bg=self.BG_COLOR)
-        input_container.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 20))
-        input_container.grid_columnconfigure(0, weight=1)
+        # Info Panel (Initially hidden)
+        self.show_info = False
+        self.info_canvas = tk.Canvas(root, bg=self.BG_COLOR, height=0, highlightthickness=0)
+        self.info_canvas.grid(row=1, column=0, sticky="ew", padx=10, pady=0)
+        self.info_canvas.grid_remove() # Fully hide initially
+        
+        self.info_bg_id = self.round_rectangle(self.info_canvas, 4, 4, 10, 10, radius=15, 
+                                               outline="", width=0, fill=self.BG_COLOR)
+        
+        self.info_inner = tk.Frame(self.info_canvas, bg=self.BG_COLOR)
+        self.info_window_id = self.info_canvas.create_window(10, 10, anchor="nw", window=self.info_inner)
+        
+        self.info_labels = []
+        for i in range(5):
+            # Container for each info item
+            item_frame = tk.Frame(self.info_inner, bg=self.BG_COLOR)
+            # We don't grid them yet, we'll do it dynamically or use pack with logic
+            
+            center_sub = tk.Frame(item_frame, bg=self.BG_COLOR)
+            center_sub.pack(expand=True, padx=10) # Added some horizontal spacing between items
+            
+            name_lbl = tk.Label(center_sub, text="", font=self.small_font, 
+                                bg=self.BG_COLOR, fg="#BDBDBD", padx=0, pady=0)
+            name_lbl.pack(side="left")
+            
+            val_lbl = tk.Label(center_sub, text="", font=self.bold_font, 
+                               bg=self.BG_COLOR, fg="#BDBDBD", padx=0, pady=0)
+            val_lbl.pack(side="left")
+            
+            self.info_labels.append((item_frame, name_lbl, val_lbl))
+        
+        self.info_canvas.bind("<Configure>", self.on_info_canvas_configure)
 
-        # Custom Rounded Input Field using Canvas (Increased Height)
-        self.input_canvas = tk.Canvas(input_container, bg=self.BG_COLOR, height=100, highlightthickness=0)
-        self.input_canvas.grid(row=0, column=0, sticky="ew")
+        # Input Area Container (Rounded with 6px COMMAND_COLOR border)
+        self.lower_canvas = tk.Canvas(root, bg=self.BG_COLOR, highlightthickness=0)
+        self.lower_canvas.grid(row=2, column=0, sticky="ew", padx=10, pady=(7, 20))
         
-        self.input_bg_id = self.round_rectangle(self.input_canvas, 0, 0, 0, 0, radius=25, fill=self.INPUT_BG)
+        self.lower_bg_id = self.round_rectangle(self.lower_canvas, 4, 4, 10, 10, radius=20, 
+                                               outline=self.COMMAND_COLOR, width=6, fill=self.INPUT_BG)
         
-        self.input_field = tk.Text(self.input_canvas, 
+        self.lower_inner = tk.Frame(self.lower_canvas, bg=self.INPUT_BG)
+        self.lower_window_id = self.lower_canvas.create_window(5, 5, anchor="nw", window=self.lower_inner)
+        self.lower_inner.grid_columnconfigure(0, weight=1)
+        self.lower_inner.grid_rowconfigure(0, weight=1)
+
+        # Center container for text to avoid clipping and ensure vertical center
+        self.input_container = tk.Frame(self.lower_inner, bg=self.INPUT_BG)
+        self.input_container.grid(row=0, column=0, sticky="nsew")
+        self.input_container.grid_columnconfigure(0, weight=1)
+        self.input_container.grid_rowconfigure(0, weight=1)
+
+        self.input_field = tk.Text(self.input_container, 
                                    height=1, 
                                    wrap='word', 
                                    font=self.base_font,
@@ -116,41 +168,34 @@ class AssistantGUI:
                                    fg=self.FG_COLOR,
                                    insertbackground=self.FG_COLOR,
                                    borderwidth=0, 
-                                   highlightthickness=0)
-        
-        # Window in canvas
-        self.input_window = self.input_canvas.create_window(20, 20, anchor="nw", window=self.input_field)
+                                   highlightthickness=0,
+                                   padx=0, pady=0,
+                                   spacing1=0, spacing2=0, spacing3=0)
+        self.input_field.grid(row=0, column=0, sticky="ew", padx=15)
         
         self.input_field.bind("<Tab>", self.handle_tab)
         self.input_field.bind("<Return>", self.handle_return)
         self.input_field.bind("<KeyRelease>", self.on_key_release)
-        self.input_canvas.bind("<Configure>", self.on_input_canvas_configure)
-        self.input_canvas.bind("<Button-1>", lambda e: self.input_field.focus_set())
+        self.lower_canvas.bind("<Button-1>", lambda e: self.input_field.focus_set())
 
-        # Custom Rounded Send Button (Increased Size)
-        self.button_canvas = tk.Canvas(input_container, bg=self.BG_COLOR, width=100, height=100, highlightthickness=0)
-        self.button_canvas.grid(row=0, column=1, sticky="s", padx=(12, 0))
-        
-        self.btn_bg_id = self.round_rectangle(self.button_canvas, 0, 0, 100, 100, radius=25, fill=self.ACCENT_COLOR)
-        self.btn_text_id = self.button_canvas.create_text(50, 50, text="Send", fill=self.BUTTON_FG, font=("Roboto", 11, "bold"))
-        
-        self.button_canvas.bind("<ButtonPress-1>", self.on_btn_press)
-        self.button_canvas.bind("<ButtonRelease-1>", self.on_btn_release)
-        self.button_canvas.bind("<Enter>", lambda e: self.button_canvas.itemconfig(self.btn_bg_id, fill="#78909C"))
-        self.button_canvas.bind("<Leave>", lambda e: self.button_canvas.itemconfig(self.btn_bg_id, fill=self.ACCENT_COLOR))
+        self.lower_canvas.bind("<Configure>", self.on_lower_canvas_configure)
 
         # Logic Setup
         self.assistant = local_assistant.LocalChatAssistant()
         self.msg_queue = queue.Queue()
         self.SLASH_COMMANDS = [
-            ["/help", "Show this help message"],
             ["/clear", "Clear conversation history"],
             ["/clear-long-term", "Reset long-term memory"],
+            ["/help", "Show this help message"],
+            ["/info", "Toggle model & system information"],
             ["/exit", "Exit the application"]
         ]
         
         # Input highlighting tag
-        self.input_field.tag_config("command_highlight", foreground=self.COMMAND_COLOR)
+        self.input_field.tag_config("command_highlight", foreground=self.SLASH_COLOR, font=self.bold_font)
+        
+        # Force initial height adjustment
+        self.adjust_input_height()
         
         # Redirect Stdout/Stderr
         sys.stdout = RedirectedStdout(self.msg_queue, "system")
@@ -158,25 +203,143 @@ class AssistantGUI:
 
         self.root.after(100, self.check_queue)
         
-        self.display_message("Type /help for commands.\n", "system")
+        self.display_message("Type /help for commands.\n\n", "system")
 
     def round_rectangle(self, canvas, x1, y1, x2, y2, radius=25, **kwargs):
         points = [x1+radius, y1, x1+radius, y1, x2-radius, y1, x2-radius, y1, x2, y1, x2, y1+radius, x2, y1+radius, x2, y2-radius, x2, y2-radius, x2, y2, x2-radius, y2, x2-radius, y2, x1+radius, y2, x1+radius, y2, x1, y2, x1, y2-radius, x1, y2-radius, x1, y1+radius, x1, y1+radius, x1, y1]
         return canvas.create_polygon(points, **kwargs, smooth=True)
 
-    def on_input_canvas_configure(self, event):
-        w, h = event.width, event.height
-        # Redraw
-        self.input_canvas.delete(self.input_bg_id)
-        self.input_bg_id = self.round_rectangle(self.input_canvas, 0, 0, w, h, radius=25, fill=self.INPUT_BG)
-        self.input_canvas.tag_lower(self.input_bg_id)
+    def toggle_info(self):
+        self.show_info = not self.show_info
+        if self.show_info:
+            self.info_canvas.grid(row=1, column=0, sticky="ew", padx=10, pady=0)
+            self.info_canvas.config(height=40) 
+            self.update_info_display()
+            self.on_info_canvas_configure(None) # Force layout calculation
+        else:
+            self.info_canvas.grid_remove()
+            self.info_canvas.config(height=0)
+
+    def update_info_display(self):
+        if not self.show_info:
+            return
+            
+        stats = self.assistant.get_model_info()
+        remaining_ctx = 100 - stats['context_pct']
         
-        # Centering the text window
-        line_height = font.Font(font=self.input_field['font']).metrics('linespace')
-        num_lines = int(self.input_field.index('end-1c').split('.')[0])
-        text_h = num_lines * line_height
-        self.input_canvas.itemconfig(self.input_window, width=w-40)
-        self.input_canvas.coords(self.input_window, 20, (h - text_h) / 2)
+        ram_val = f"{stats['ram_mb']}MB" if stats['ram_mb'] > 0 else "-"
+        vram_val = f"{stats['vram_mb']}MB" if stats['vram_mb'] > 0 else "-"
+        
+        # List of (Name, Value) pairs
+        data = [
+            ("Model: ", f"{stats['model']}"),
+            ("Context Remaining: ", f"{remaining_ctx:.1f}%"),
+            ("Long-term Memory: ", f"{stats['memory_entries']} rows"),
+            ("RAM usage: ", ram_val),
+            ("VRAM usage: ", vram_val)
+        ]
+        
+        for i, (name, val) in enumerate(data):
+            self.info_labels[i][1].config(text=name)
+            self.info_labels[i][2].config(text=val)
+            
+        self.on_info_canvas_configure(None)
+
+    def on_info_canvas_configure(self, event):
+        w = self.info_canvas.winfo_width()
+        if w < 10: return
+        
+        # --- Balanced Flow Layout Logic ---
+        self.info_inner.update_idletasks()
+        max_w = w - 40 # Padding
+        
+        # First, group items into rows
+        rows = [[]]
+        current_row_w = 0
+        
+        for item_frame, _, _ in self.info_labels:
+            item_frame.update_idletasks()
+            item_w = item_frame.winfo_reqwidth()
+            
+            # If item doesn't fit in current row, start a new one
+            if current_row_w + item_w > max_w and rows[-1]:
+                rows.append([])
+                current_row_w = 0
+            
+            rows[-1].append((item_frame, item_w))
+            current_row_w += item_w + 20 # Minimum gap
+
+        current_y = 0
+        total_needed_h = 0
+        
+        for row in rows:
+            if not row: continue
+            
+            # Calculate total width of items in this row
+            row_items_w = sum(item[1] for item in row)
+            # Distribute remaining space equally as horizontal padding
+            row_padding = (max_w - row_items_w) / (len(row) + 1)
+            
+            current_x = row_padding
+            row_h = 0
+            for item_frame, item_w in row:
+                item_h = item_frame.winfo_reqheight()
+                item_frame.place(x=current_x, y=current_y)
+                current_x += item_w + row_padding
+                row_h = max(row_h, item_h)
+            
+            current_y += row_h + 5
+            total_needed_h = current_y
+
+        # Update canvas height if it changed significantly (to avoid loops)
+        if self.show_info:
+            target_h = max(40, total_needed_h + 10)
+            if abs(self.info_canvas.winfo_height() - target_h) > 5:
+                self.info_canvas.config(height=target_h)
+
+        # Update background
+        self.info_canvas.delete(self.info_bg_id)
+        h = self.info_canvas.winfo_height()
+        self.info_bg_id = self.round_rectangle(self.info_canvas, 4, 4, w-4, h-4, radius=15, 
+                                               outline="", width=0, fill=self.BG_COLOR)
+        self.info_canvas.tag_lower(self.info_bg_id)
+        
+        # Adjust inner window size
+        self.info_canvas.itemconfig(self.info_window_id, width=max_w, height=total_needed_h)
+        # Re-center vertically based on new height
+        self.info_canvas.coords(self.info_window_id, 20, (h - total_needed_h) / 2)
+
+    def on_chat_canvas_configure(self, event):
+        w, h = event.width, event.height
+        self.chat_canvas.delete(self.chat_bg_id)
+        # Offset to 4px for 6px border
+        self.chat_bg_id = self.round_rectangle(self.chat_canvas, 4, 4, w-4, h-4, radius=25, 
+                                               outline=self.ACCENT_COLOR, width=6, fill=self.BG_COLOR)
+        self.chat_canvas.tag_lower(self.chat_bg_id)
+        
+        # Resize inner window and provide enough padding to avoid clipping at corners
+        pad = 12 
+        self.chat_canvas.itemconfig(self.chat_window_id, width=w-(pad*2), height=h-(pad*2))
+        self.chat_canvas.coords(self.chat_window_id, pad, pad)
+
+    def on_lower_canvas_configure(self, event):
+        self.update_lower_border()
+
+    def update_lower_border(self):
+        w = self.lower_canvas.winfo_width()
+        h = self.lower_canvas.winfo_height()
+        if w < 10 or h < 10: return
+        self.lower_canvas.delete(self.lower_bg_id)
+        # Offset to 4 to ensure 6px border is fully inside and not clipped
+        self.lower_bg_id = self.round_rectangle(self.lower_canvas, 4, 4, w-4, h-4, radius=20, 
+                                               outline=self.COMMAND_COLOR, width=6, fill=self.INPUT_BG)
+        self.lower_canvas.tag_lower(self.lower_bg_id)
+        
+        # Consistent padding for centering
+        pad_x = 8
+        pad_y = 10 
+        self.lower_canvas.itemconfig(self.lower_window_id, width=w-(pad_x*2), height=h-(pad_y*2))
+        self.lower_canvas.coords(self.lower_window_id, pad_x, pad_y)
 
     def on_key_release(self, event=None):
         self.adjust_input_height(event)
@@ -213,36 +376,17 @@ class AssistantGUI:
         
         # Adjust canvas height
         line_height = font.Font(font=self.input_field['font']).metrics('linespace')
-        # Reduced padding to make text field occupy more relative space
-        total_height = (new_height * line_height) + 40
-        if total_height < 70: total_height = 70 # Minimum height
+        # pad_y = 10. Total extra height = 10 * 2 = 20
+        total_height = (new_height * line_height) + 20
         
-        self.input_canvas.config(height=total_height)
-        
-        # Re-center the window vertically
-        self.input_canvas.coords(self.input_window, 20, (total_height - (new_height * line_height)) / 2)
-        
-        # Resize button canvas to match
-        self.button_canvas.config(height=total_height)
-        self.redraw_button(100, total_height)
-
-    def redraw_button(self, w, h):
-        self.button_canvas.delete("all")
-        self.btn_bg_id = self.round_rectangle(self.button_canvas, 0, 0, w, h, radius=25, fill=self.ACCENT_COLOR)
-        self.btn_text_id = self.button_canvas.create_text(w/2, h/2, text="Send", fill=self.BUTTON_FG, font=("Roboto", 11, "bold"))
-        
-        # Re-bind events since we deleted "all"
-        self.button_canvas.bind("<ButtonPress-1>", self.on_btn_press)
-        self.button_canvas.bind("<ButtonRelease-1>", self.on_btn_release)
-        self.button_canvas.bind("<Enter>", lambda e: self.button_canvas.itemconfig(self.btn_bg_id, fill="#78909C"))
-        self.button_canvas.bind("<Leave>", lambda e: self.button_canvas.itemconfig(self.btn_bg_id, fill=self.ACCENT_COLOR))
+        self.lower_canvas.config(height=total_height)
+        self.update_lower_border()
 
     def on_btn_press(self, event):
-        self.button_canvas.itemconfig(self.btn_bg_id, fill="#455A64")
+        pass
 
     def on_btn_release(self, event):
-        self.button_canvas.itemconfig(self.btn_bg_id, fill=self.ACCENT_COLOR)
-        self.send_message()
+        pass
 
     def handle_return(self, event):
         if not event.state & 0x1: # Shift not held
@@ -257,7 +401,7 @@ class AssistantGUI:
         self.input_field.delete("1.0", tk.END)
         self.adjust_input_height() # Reset height to 1 line
         
-        self.display_message(f"\n{user_input}\n\n", "user")
+        self.display_message(user_input, "user")
         self.input_field.config(state='disabled')
         
         threading.Thread(target=self.process_input, args=(user_input,), daemon=True).start()
@@ -278,9 +422,17 @@ class AssistantGUI:
                 self.assistant.clear_long_term_memory()
                 self.msg_queue.put(("enable", None, None))
                 return
+            if user_input.lower() == '/info':
+                self.msg_queue.put(("toggle_info", None, None))
+                self.msg_queue.put(("enable", None, None))
+                return
             if user_input.lower() == '/help':
-                max_len = max(len(cmd[0]) for cmd in self.SLASH_COMMANDS)
-                help_text = "Available Commands:\n" + "\n".join([f"  {cmd.ljust(max_len + 4)} {desc}" for cmd, desc in self.SLASH_COMMANDS])
+                lines = []
+                for i, (cmd, desc) in enumerate(self.SLASH_COMMANDS):
+                    if cmd == "/exit" and i > 0:
+                        lines.append("") # Spacer before exit
+                    lines.append(f"    {cmd}\t{desc}")
+                help_text = "Available Commands:\n" + "\n".join(lines)
                 print(help_text)
                 self.msg_queue.put(("enable", None, None))
                 return
@@ -346,16 +498,46 @@ class AssistantGUI:
                     self.render_tokens(tokens, "assistant")
                 except Exception:
                     self.chat_display.insert(tk.END, self.full_current_response, "assistant")
+                
+                if final:
+                    # Remove trailing newlines from markdown rendering to control spacing
+                    if self.chat_display.get("end-2c", "end-1c") == "\n":
+                        self.chat_display.delete("end-2c", "end-1c")
+                    
+                    self.insert_separator(height=40) # Larger padding for responses
+                    # Reset marker for next assistant message
+                    self.chat_display.mark_set("assistant_msg_start", "end-1c")
+                    self.chat_display.mark_gravity("assistant_msg_start", tk.LEFT)
             else:
                 # Just append raw during character streaming for smoothness
                 self.chat_display.insert(tk.END, text, "assistant")
         else:
+            # For non-assistant (user/system/error), handle spacing consistently
             self.chat_display.insert(tk.END, text, tag)
-            self.chat_display.mark_set("assistant_msg_start", "end-1c")
             self.full_current_response = ""
+            if tag == "user":
+                self.insert_separator(height=40) 
+                self.chat_display.mark_set("assistant_msg_start", "end-1c")
+                self.chat_display.mark_gravity("assistant_msg_start", tk.LEFT)
             
         self.chat_display.see(tk.END)
         self.chat_display.config(state='disabled')
+
+    def insert_separator(self, height=25):
+        # Calculate width dynamically
+        width = self.chat_display.winfo_width() - 40 
+        if width < 100: width = 600
+        
+        # Variable height canvas for custom spacing
+        sep_canvas = tk.Canvas(self.chat_display, bg=self.BG_COLOR, height=height, 
+                               highlightthickness=0, width=width)
+        # Draw the line centered in whatever height is provided
+        mid_y = height // 2
+        sep_canvas.create_line(10, mid_y, width-10, mid_y, fill="#2A2A2A")
+        
+        # Use end-1c to ensure it's before the very last newline to keep structure
+        self.chat_display.window_create(tk.END, window=sep_canvas)
+        self.chat_display.insert(tk.END, "\n")
 
     def render_tokens(self, tokens, base_tag, extra_tags=None):
         tags = (base_tag,) if extra_tags is None else (extra_tags, base_tag)
@@ -433,7 +615,7 @@ class AssistantGUI:
         
         self.tooltip_window = tw = tk.Toplevel(self.root)
         tw.wm_overrideredirect(True) # Remove window decorations
-        tw.wm_geometry(f"{x}+{y}")
+        tw.wm_geometry(f"+{x}+{y}")
         
         label = tk.Label(tw, text=f"Ctrl + Click to open {url}", 
                          justify='left', background="#37474F", foreground="#ECECEC",
@@ -496,8 +678,11 @@ class AssistantGUI:
 
             # Insert the frame into the text widget
             self.chat_display.insert(tk.END, "\n")
+            # Force size calculation before embedding to prevent clipping
+            table_frame.update_idletasks()
             self.chat_display.window_create(tk.END, window=table_frame)
-            self.chat_display.insert(tk.END, "\n")
+            # Add a small explicit vertical space after the table to prevent border cutoff
+            self.chat_display.insert(tk.END, "\n ") 
             
         except Exception as e:
             # If parsing fails during streaming (e.g. incomplete table), 
@@ -525,10 +710,15 @@ class AssistantGUI:
                 self.chat_display.config(state='normal')
                 self.chat_display.delete("1.0", tk.END)
                 self.chat_display.config(state='disabled')
-                self.display_message("Type /help for commands.\n", "system")
+                self.display_message("Type /help for commands.\n\n", "system")
                 self.full_current_response = ""
             elif action == "final_render":
                 self.display_message("", tag, final=True)
+                self.msg_queue.put(("update_info", None, None))
+            elif action == "toggle_info":
+                self.toggle_info()
+            elif action == "update_info":
+                self.update_info_display()
             elif action == "enable":
                 self.input_field.config(state='normal')
                 self.input_field.focus_set()

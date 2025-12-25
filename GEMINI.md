@@ -17,57 +17,40 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 ## Architecture & Features
 
 ### 1. Modern GUI
-- **Dynamic Interface**: Automatically resizing input box and Send button.
-- **Rich Text Rendering**: Full Markdown support including bold, italics, headers, lists, and links.
-- **Graphical Tables**: Markdown tables are rendered as clean, bordered visual grids.
-- **Custom Styling**: Modern rounded corners and a bespoke rounded scrollbar.
+- **Custom Theming**: A desaturated blue-purple palette with 6px thick rounded borders for distinct UI containers.
+- **Dynamic Interface**: A minimalist input box that starts as a single line and expands vertically up to 8 lines.
+- **Message Separation**: Faint horizontal separators (`#2A2A2A`) automatically inserted between message turns for clear visual structure.
+- **Rich Text Rendering**: Full Markdown support with specific handling for tables (rendered as bordered grids) and syntax-highlighted code spans.
+- **Responsive Info Panel**: A toggleable `/info` dashboard that uses a custom flow layout to wrap or distribute statistics based on window width.
 
 ### 2. Intelligent Memory
-- **SQLite Powered**: Facts are stored in a structured database (`res/memory.db`) with O(log N) retrieval speed.
+- **SQLite Powered**: Facts are stored in a structured database (`res/memory.db`).
 - **Contextual Retrieval**: Instead of loading all facts, the assistant uses keyword matching to fetch only the most relevant memories for the current query.
 - **Delta-based Updates**: Memory is updated non-blockingly in the background using specific ADD/REMOVE/UPDATE operations suggested by the LLM.
-- **Source of Truth**: The model is strictly instructed to treat the memory as the definitive source for personal details, reducing hallucinations.
+- **Fact Counting**: Internal logic tracks the total number of recorded memory entries for system monitoring.
 
 ### 3. Real-Time Search
 - Uses a two-step process:
   1. **Decision**: Prompts the LLM to decide if real-time data is needed.
   2. **Execution**: Fetches top search results and injects them into the conversation context.
 
+### 4. System Monitoring
+- **Live Stats**: Real-time tracking of Ollama model resource usage, including RAM, VRAM, and estimated context window consumption.
+- **Automatic Updates**: Statistics are refreshed automatically every time the model finishes generating a response.
+
 ## Project Structure
 
 - `src/`: Contains all source code.
-  - `gui_assistant.py`: The main GUI application and rendering logic.
-  - `local_assistant.py`: The core `LocalChatAssistant` and `MemoryStore` classes.
+  - `gui_assistant.py`: The main GUI application, layout management, and rendering logic.
+  - `local_assistant.py`: The core logic for LLM interaction, search orchestration, and stat gathering.
+  - `memory.py`: Database interface for fact storage and retrieval.
 - `res/`: Contains project resources and persistent data.
   - `memory.db`: The SQLite database for long-term memory.
-- `run_gui.sh`: Shell script to activate the virtual environment and launch Lokality.
-
-## Getting Started
-
-### Prerequisites
-- [Ollama](https://ollama.com/) must be installed and running.
-- Pull a supported model (e.g., Gemma, Llama):
-  ```bash
-  ollama pull <model_name>
-  ```
-
-Update `MODEL_NAME` in `src/local_assistant.py` to match your pulled model.
-
-### Running the Assistant
-Execute the following command in your terminal:
-```bash
-./run_gui.sh
-```
-
-### Available Commands
-Inside the chat, you can use:
-- `/help`: Show available commands.
-- `/clear`: Clear the current conversation history and the visible chat window.
-- `/clear-long-term`: Reset the entire long-term memory database.
-- `/exit` or `quit`: Terminate the session.
+- `launch.sh`: Main entry point for launching the application within the virtual environment.
 
 ## Development Conventions
 
+- **Git Commands**: Only perform git commands (commit, branch, checkout, etc.) when the user explicitly says to do so.
 - **Non-Blocking**: Heavy operations like LLM memory updates run in background threads to keep the UI responsive.
 - **Selective Learning**: The assistant is extractive, focusing on permanent user attributes and identity facts.
 - **Security**: No sensitive data or API keys are stored; everything runs locally via Ollama and SQLite.
