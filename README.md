@@ -49,7 +49,7 @@ Lokality is a local-first, privacy-focused desktop AI assistant. Powered by Olla
 ## Available Commands
 - `/bypass <prompt>`: Send a raw prompt directly to the Ollama CLI (bypass assistant logic).
 - `/clear`: Reset current conversation history.
-- `/clear-long-term`: Permanently erase the long-term memory database.
+- `/forget`: Permanently erase the long-term memory database.
 - `/help`: View all available commands with descriptions.
 - `/info`: Toggle the model and system statistics panel.
 - `/exit`: Terminate the application.

@@ -35,7 +35,7 @@ class AssistantApp:
         self.SLASH_COMMANDS = [
             ["/bypass", "Send raw prompt directly to model"],
             ["/clear", "Clear conversation history"],
-            ["/clear-long-term", "Reset long-term memory"],
+            ["/forget", "Reset long-term memory"],
             ["/help", "Show this help message"],
             ["/info", "Toggle model & system information"],
             ["/exit", "Exit the application"]
@@ -133,7 +133,7 @@ class AssistantApp:
         
         self.input_field = tk.Text(self.lower_inner, height=1, width=1, wrap='word', font=self.fonts["base"],
                                    bg=Theme.INPUT_BG, fg=Theme.FG_COLOR, insertbackground=Theme.FG_COLOR,
-                                   borderwidth=0, highlightthickness=0, padx=15, pady=0)
+                                   borderwidth=0, highlightthickness=0, padx=15, pady=10)
         self.input_field.grid(row=0, column=0, sticky="nsew")
         self.input_field.tag_config("command_highlight", foreground=Theme.SLASH_COLOR, font=self.fonts["bold"])
 
@@ -285,90 +285,109 @@ class AssistantApp:
     def process_input(self, user_input):
         self.stop_generation = False
         try:
-            cmd = user_input.lower()
-            if cmd in ['/exit', 'exit', 'quit']:
-                self.msg_queue.put(("quit", None, None))
-                return
-            if cmd == '/clear':
-                self.assistant.messages = []
-                print("Conversation memory cleared.")
-                self.msg_queue.put(("clear", None, None))
-                self.msg_queue.put(("enable", None, None))
-                return
-            if cmd == '/clear-long-term':
-                self.assistant.clear_long_term_memory()
-                self.msg_queue.put(("enable", None, None))
-                return
-            if cmd == '/info':
-                self.msg_queue.put(("toggle_info", None, None))
-                self.msg_queue.put(("enable", None, None))
-                return
-            if cmd == '/help':
-                help_text = "Available Commands:\n" + "\n".join([f"    {c}\t{d}" for c, d in self.SLASH_COMMANDS])
-                print(help_text)
-                self.msg_queue.put(("separator", None, None))
-                self.msg_queue.put(("enable", None, None))
+            cmd_map = {
+                '/clear': self._cmd_clear,
+                '/forget': self._cmd_forget,
+                '/info': self._cmd_info,
+                '/help': self._cmd_help,
+                '/exit': self._cmd_exit,
+                'exit': self._cmd_exit,
+                'quit': self._cmd_exit
+            }
+            
+            clean_input = user_input.lower().split()
+            first_word = clean_input[0] if clean_input else ""
+            
+            if first_word in cmd_map:
+                cmd_map[first_word](user_input)
                 return
 
-            if cmd.startswith('/bypass'):
-                raw = user_input[7:].strip()
-                if not raw:
-                    self.msg_queue.put(("text", "Usage: /bypass <prompt>\n", "system") )
-                else:
-                    self.msg_queue.put(("text", "\n", "assistant"))
-                    res, proc = ShellIntegration.run_ollama_bypass(raw, self.msg_queue, lambda: self.stop_generation)
-                    self.active_process = proc
-                    
-                    if self.stop_generation:
-                        self.msg_queue.put(("text", "[Interrupted]", "cancelled"))
-                    else:
-                        if res == "COMPLETED":
-                            self.msg_queue.put(("text", "\n", "assistant"))
-                            self.msg_queue.put(("final_render", "", "assistant"))
-                        else:
-                            # It might have ended due to process exit or error
-                            self.msg_queue.put(("text", "\n", "assistant"))
-                            self.msg_queue.put(("final_render", "", "assistant"))
-                    
-                    if self.active_process:
-                        try:
-                            os.kill(self.active_process.pid, signal.SIGTERM)
-                        except: pass
-                        self.active_process = None
-                    
-                self.msg_queue.put(("enable", None, None))
+            if first_word == '/bypass':
+                self._cmd_bypass(user_input)
                 return
 
             # Main Assistant
-            search_context = self.assistant.decide_and_search(user_input)
-            self.assistant._update_system_prompt(user_input)
-            msgs = [{"role": "system", "content": self.assistant.system_prompt}] + self.assistant.messages
-            if search_context:
-                msgs.append({"role": "system", "content": f"EXTRACTED INTERNET CONTEXT:\n{search_context}"})
-            msgs.append({"role": "user", "content": user_input})
-
             self.msg_queue.put(("text", "\n", "assistant") )
-            full_response = ""
-            stream = local_assistant.client.chat(model=MODEL_NAME, messages=msgs, stream=True)
-            for chunk in stream:
-                if self.stop_generation:
-                    self.msg_queue.put(("text", "[Interrupted]", "cancelled") )
-                    break
-                content = chunk['message']['content']
-                full_response += content
-                self.msg_queue.put(("text", content, "assistant") )
             
-            if not self.stop_generation:
-                self.msg_queue.put(("text", "\n", "assistant") )
-                self.assistant.messages.extend([{"role": "user", "content": user_input}, {"role": "assistant", "content": full_response}])
-                self.msg_queue.put(("final_render", "", "assistant") )
-                self.assistant.update_memory_async(user_input, full_response)
-                if len(self.assistant.messages) > 20: self.assistant.messages = self.assistant.messages[-20:]
+            def run_assistant():
+                try:
+                    search_context = self.assistant.decide_and_search(user_input)
+                    self.assistant._update_system_prompt(user_input)
+                    msgs = [{"role": "system", "content": self.assistant.system_prompt}] + self.assistant.messages
+                    if search_context:
+                        msgs.append({"role": "system", "content": f"EXTRACTED INTERNET CONTEXT:\n{search_context}"})
+                    msgs.append({"role": "user", "content": user_input})
+
+                    full_response = ""
+                    stream = local_assistant.client.chat(model=MODEL_NAME, messages=msgs, stream=True)
+                    for chunk in stream:
+                        if self.stop_generation:
+                            self.msg_queue.put(("text", "[Interrupted]", "cancelled") )
+                            break
+                        content = chunk['message']['content']
+                        full_response += content
+                        self.msg_queue.put(("text", content, "assistant") )
+                    
+                    if not self.stop_generation:
+                        self.msg_queue.put(("text", "\n", "assistant") )
+                        self.assistant.messages.extend([{"role": "user", "content": user_input}, {"role": "assistant", "content": full_response}])
+                        self.msg_queue.put(("final_render", "", "assistant") )
+                        self.assistant.update_memory_async(user_input, full_response)
+                        if len(self.assistant.messages) > 20: self.assistant.messages = self.assistant.messages[-20:]
+                except Exception as e:
+                    self.msg_queue.put(("text", f"Error: {e}\n", "error") )
+                finally:
+                    self.msg_queue.put(("enable", None, None))
+
+            threading.Thread(target=run_assistant, daemon=True).start()
+            return
 
         except Exception as e:
             self.msg_queue.put(("text", f"Error: {e}\n", "error") )
-        finally:
             self.msg_queue.put(("enable", None, None))
+
+    # --- Command Handlers ---
+    def _cmd_exit(self, _):
+        self.msg_queue.put(("quit", None, None))
+
+    def _cmd_clear(self, _):
+        self.assistant.messages = []
+        print("Conversation memory cleared.")
+        self.msg_queue.put(("clear", None, None))
+        self.msg_queue.put(("enable", None, None))
+
+    def _cmd_forget(self, _):
+        self.assistant.clear_long_term_memory()
+        self.msg_queue.put(("enable", None, None))
+
+    def _cmd_info(self, _):
+        self.msg_queue.put(("toggle_info", None, None))
+        self.msg_queue.put(("enable", None, None))
+
+    def _cmd_help(self, _):
+        help_text = "Available Commands:\n" + "\n".join([f"    {c}\t{d}" for c, d in self.SLASH_COMMANDS])
+        print(help_text)
+        self.msg_queue.put(("separator", None, None))
+        self.msg_queue.put(("enable", None, None))
+
+    def _cmd_bypass(self, user_input):
+        raw = user_input[7:].strip()
+        if not raw:
+            self.msg_queue.put(("text", "Usage: /bypass <prompt>\n", "system") )
+        else:
+            self.msg_queue.put(("text", "\n", "assistant"))
+            res, proc = ShellIntegration.run_ollama_bypass(raw, self.msg_queue, lambda: self.stop_generation)
+            self.active_process = proc
+            if self.stop_generation:
+                self.msg_queue.put(("text", "[Interrupted]", "cancelled"))
+            else:
+                self.msg_queue.put(("text", "\n", "assistant"))
+                self.msg_queue.put(("final_render", "", "assistant"))
+            if self.active_process:
+                try: os.kill(self.active_process.pid, signal.SIGTERM)
+                except: pass
+                self.active_process = None
+        self.msg_queue.put(("enable", None, None))
 
     # --- Rendering ---
     def display_message(self, text, tag, final=False):
@@ -381,7 +400,9 @@ class AssistantApp:
             self.finalize_message_turn()
         elif tag == "assistant":
             if not final: self.full_current_response += text
-            if "\n" in text or len(text) > 20 or final:
+            # OPTIMIZATION: Only do full markdown re-render on newlines or final, 
+            # otherwise just append the raw text for speed.
+            if "\n" in text or final:
                 self.chat_display.delete("assistant_msg_start", tk.END)
                 tokens = self.md_parser(self.full_current_response.strip())
                 self.markdown_engine.render_tokens(tokens, "assistant")
@@ -432,14 +453,21 @@ class AssistantApp:
             elif action == "final_render": self.display_message("", tag, final=True); self.update_info_display()
             elif action == "toggle_info": self.show_info = not self.show_info; self.info_canvas.grid() if self.show_info else self.info_canvas.grid_remove(); self.update_info_display()
             elif action == "update_info": self.update_info_display()
+            elif action == "update_info_ui": self.update_info_ui(content)
             elif action == "enable": self.input_field.config(state='normal'); self.input_field.focus_set()
             elif action == "quit": self.root.quit()
-        self.root.after(100, self.check_queue)
+        self.root.after(30, self.check_queue) # OPTIMIZATION: Faster polling for smoother UI
 
     def update_info_display(self):
         if not self.show_info: return
-        stats = self.assistant.get_model_info()
         
+        def gather():
+            stats = self.assistant.get_model_info()
+            self.msg_queue.put(("update_info_ui", stats, None))
+        
+        threading.Thread(target=gather, daemon=True).start()
+
+    def update_info_ui(self, stats):
         ram_val = stats['ram_mb'] if stats['ram_mb'] > 0 else "-"
         ram_unit = "MB" if stats['ram_mb'] > 0 else ""
         
