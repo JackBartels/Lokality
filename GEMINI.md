@@ -17,40 +17,46 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 ## Architecture & Features
 
 ### 1. Modern GUI
-- **Custom Theming**: A desaturated blue-purple palette with 6px thick rounded borders for distinct UI containers.
-- **Dynamic Interface**: A minimalist input box that starts as a single line and expands vertically up to 8 lines.
+- **Custom Theming**: Centralized in `src/theme.py`. A desaturated blue-purple palette with 6px thick rounded borders for distinct UI containers.
+- **Smart Input**: A minimalist input box that expands vertically up to 8 lines. It supports both manual newlines (Shift+Enter) and automatic expansion for word-wrapped text using visual line detection.
 - **Message Separation**: Faint horizontal separators (`#2A2A2A`) automatically inserted between message turns for clear visual structure.
-- **Rich Text Rendering**: Full Markdown support with specific handling for tables (rendered as bordered grids) and syntax-highlighted code spans.
+- **Rich Text Rendering**: Handled by a dedicated `MarkdownEngine`. Supports full Markdown including tables (rendered as bordered grids), syntax-highlighted code spans, and clickable links with tooltips.
 - **Responsive Info Panel**: A toggleable `/info` dashboard that uses a custom flow layout to wrap or distribute statistics based on window width.
 
 ### 2. Intelligent Memory
 - **SQLite Powered**: Facts are stored in a structured database (`res/memory.db`).
 - **Contextual Retrieval**: Instead of loading all facts, the assistant uses keyword matching to fetch only the most relevant memories for the current query.
-- **Delta-based Updates**: Memory is updated non-blockingly in the background using specific ADD/REMOVE/UPDATE operations suggested by the LLM.
-- **Fact Counting**: Internal logic tracks the total number of recorded memory entries for system monitoring.
+- **Delta-based Updates**: Memory is updated non-blockingly using `MemoryManager`. It uses an LLM-driven "extraction" phase to suggest ADD/REMOVE/UPDATE operations.
 
-### 3. Real-Time Search
-- Uses a two-step process:
-  1. **Decision**: Prompts the LLM to decide if real-time data is needed.
-  2. **Execution**: Fetches top search results and injects them into the conversation context.
+### 3. Real-Time Search & Integration
+- **Search Engine**: A decoupled module using DuckDuckGo to fetch real-time data when the LLM determines it is necessary.
+- **Bypass Mode**: A raw shell integration using PTY (Pseudo-Terminal) allows users to bypass the assistant logic and speak directly to the Ollama CLI wrapper.
 
 ### 4. System Monitoring
-- **Live Stats**: Real-time tracking of Ollama model resource usage, including RAM, VRAM, and estimated context window consumption.
-- **Automatic Updates**: Statistics are refreshed automatically every time the model finishes generating a response.
+- **Live Stats**: Handled by `StatsCollector`. Real-time tracking of Ollama model resource usage, including RAM, VRAM, and estimated context window consumption.
+- **Visual Refinement**: Units (MB, %) are rendered in a smaller `unit` font for better visual hierarchy. Stats refresh automatically after every response.
 
 ## Project Structure
 
-- `src/`: Contains all source code.
-  - `gui_assistant.py`: The main GUI application, layout management, and rendering logic.
-  - `local_assistant.py`: The core logic for LLM interaction, search orchestration, and stat gathering.
-  - `memory.py`: Database interface for fact storage and retrieval.
-- `res/`: Contains project resources and persistent data.
+- `src/`: Refactored into specialized modules.
+  - `app.py`: Main entry point and GUI orchestration.
+  - `config.py`: Global constants (version, model names, debug flags).
+  - `theme.py`: UI styling, colors, and font definitions.
+  - `markdown_engine.py`: Logic for rendering Markdown tokens into Tkinter widgets.
+  - `shell_integration.py`: PTY-based logic for the direct Ollama bypass.
+  - `local_assistant.py`: Core logic for conversation management.
+  - `memory.py`: Low-level SQLite database interface.
+  - `memory_manager.py`: LLM-driven fact extraction and delta management.
+  - `search_engine.py`: DuckDuckGo search integration.
+  - `stats_collector.py`: Resource monitoring and context estimation.
+  - `ui_components.py`: Custom Tkinter widgets like the rounded scrollbar.
+  - `utils.py`: Shared utilities (rounded rectangles, ANSI stripping, stdout redirection).
+- `res/`: Persistent data.
   - `memory.db`: The SQLite database for long-term memory.
-- `launch.sh`: Main entry point for launching the application within the virtual environment.
+- `launch.sh`: Main entry point for launching the application via `src/app.py`.
 
 ## Development Conventions
 
-- **Git Commands**: Only perform git commands (commit, branch, checkout, etc.) when the user explicitly says to do so.
-- **Non-Blocking**: Heavy operations like LLM memory updates run in background threads to keep the UI responsive.
+- **Modular Design**: UI, Search, Stats, and Memory logic are strictly separated.
+- **Non-Blocking**: Heavy operations (LLM extraction, web search) run in background threads.
 - **Selective Learning**: The assistant is extractive, focusing on permanent user attributes and identity facts.
-- **Security**: No sensitive data or API keys are stored; everything runs locally via Ollama and SQLite.
