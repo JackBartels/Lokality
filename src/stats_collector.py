@@ -1,5 +1,6 @@
 from config import MODEL_NAME
 import ollama
+from utils import debug_print
 
 client = ollama.Client()
 
@@ -44,6 +45,6 @@ class StatsCollector:
             stats["context_pct"] = min(100, (estimated_tokens / max_ctx) * 100)
             
         except Exception as e:
-            print(f"Error gathering info: {e}")
+            debug_print(f"[*] Error gathering info: {e}")
             
         return stats

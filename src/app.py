@@ -7,9 +7,10 @@ import os
 import signal
 
 # Local imports
+import config
 from config import VERSION, MODEL_NAME
 from theme import Theme
-from utils import RedirectedStdout, round_rectangle
+from utils import RedirectedStdout, round_rectangle, debug_print
 from ui_components import CustomScrollbar
 from markdown_engine import MarkdownEngine
 from shell_integration import ShellIntegration
@@ -35,6 +36,7 @@ class AssistantApp:
         self.SLASH_COMMANDS = [
             ["/bypass", "Send raw prompt directly to model"],
             ["/clear", "Clear conversation history"],
+            ["/debug", "Toggle debug mode"],
             ["/forget", "Reset long-term memory"],
             ["/help", "Show this help message"],
             ["/info", "Toggle model & system information"],
@@ -287,6 +289,7 @@ class AssistantApp:
         try:
             cmd_map = {
                 '/clear': self._cmd_clear,
+                '/debug': self._cmd_debug,
                 '/forget': self._cmd_forget,
                 '/info': self._cmd_info,
                 '/help': self._cmd_help,
@@ -352,12 +355,18 @@ class AssistantApp:
 
     def _cmd_clear(self, _):
         self.assistant.messages = []
-        print("Conversation memory cleared.")
+        debug_print("[*] Conversation memory cleared.")
         self.msg_queue.put(("clear", None, None))
         self.msg_queue.put(("enable", None, None))
 
     def _cmd_forget(self, _):
         self.assistant.clear_long_term_memory()
+        self.msg_queue.put(("enable", None, None))
+
+    def _cmd_debug(self, _):
+        config.DEBUG = not config.DEBUG
+        status = "ENABLED" if config.DEBUG else "DISABLED"
+        print(f"[*] Debug mode {status}")
         self.msg_queue.put(("enable", None, None))
 
     def _cmd_info(self, _):

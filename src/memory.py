@@ -2,6 +2,7 @@ import sqlite3
 import os
 import re
 import threading
+from utils import debug_print
 
 class MemoryStore:
     def __init__(self, db_path=None):
@@ -64,7 +65,7 @@ class MemoryStore:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_created ON memory(created_at)")
                 conn.commit()
         except sqlite3.Error as e:
-            print(f"\033[91m[*] Memory: Database error during init: {e}. Resetting...\033[0m")
+            debug_print(f"[*] Memory: Database error during init: {e}. Resetting...")
             self._reset_corrupted_db()
 
     def _get_conn(self):
@@ -137,7 +138,7 @@ class MemoryStore:
                             for r in cursor.fetchall():
                                 all_facts.append({"id": r['id'], "entity": r['entity'], "fact": r['fact']})
         except sqlite3.Error as e:
-            print(f"\033[91m[*] Memory: Runtime error: {e}\033[0m")
+            debug_print(f"[*] Memory: Runtime error: {e}")
             return []
 
         # Deduplicate while preserving order
@@ -193,9 +194,9 @@ class MemoryStore:
                 path = self.db_path + ext
                 if os.path.exists(path):
                     os.remove(path)
-            print(f"[*] Memory: Database files cleared.")
+            debug_print(f"[*] Memory: Database files cleared.")
         except Exception as e:
-            print(f"[*] Memory: Failed to delete database files: {e}")
+            debug_print(f"[*] Memory: Failed to delete database files: {e}")
             # Fallback: at least try to clear the main table
             try:
                 conn = self._get_conn()

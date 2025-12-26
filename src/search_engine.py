@@ -1,10 +1,11 @@
 from ddgs import DDGS
+from utils import debug_print
 
 class SearchEngine:
     @staticmethod
     def web_search(query):
         """Performs a DuckDuckGo search and returns the top results."""
-        print(f"[\033[90m*] Searching for: {query}[\033[0m")
+        debug_print(f"[*] Searching for: {query}")
         try:
             with DDGS() as ddgs:
                 results = list(ddgs.text(query, max_results=5))
