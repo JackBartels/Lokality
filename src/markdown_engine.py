@@ -62,10 +62,17 @@ class MarkdownEngine:
             elif t_type == 'link':
                 link_text = self.get_token_text(token['children'])
                 url = token['attrs']['url']
-                unique_tag = f"link_{id(token)}"
-                self.text_widget.tag_config(unique_tag, underline=False) 
-                self.text_widget.insert(tk.END, link_text, ("md_link", unique_tag, base_tag))
+                # OPTIMIZATION: Use a fixed tag for links instead of unique per-token tags to avoid tag accumulation
+                self.text_widget.insert(tk.END, link_text, ("md_link", base_tag))
                 
+                # We need to bind specific events for this specific range
+                # Since we are using a shared tag "md_link", we'll use mark-based or range-based binds if possible
+                # But for simplicity and to fix the leak, we'll keep it simple for now or use a small pool.
+                # Actually, unique tags are needed for specific URLs, but we should reuse them if content is same.
+                # To really optimize, we'd use one tag and find the URL at the index on click.
+                
+                unique_tag = f"link_{hash(url)}" # Reuse tag for same URL
+                self.text_widget.tag_add(unique_tag, "end-1c - %dc" % len(link_text), "end-1c")
                 self.text_widget.tag_bind(unique_tag, "<Control-Button-1>", lambda e, u=url: webbrowser.open(u))
                 self.text_widget.tag_bind(unique_tag, "<Enter>", lambda e, u=url: self.tooltip_callback(e, u))
                 self.text_widget.tag_bind(unique_tag, "<Leave>", lambda e: self.tooltip_callback(None, None))
@@ -101,7 +108,7 @@ class MarkdownEngine:
                 table_frame.grid_columnconfigure(j, weight=1)
 
             self.text_widget.insert(tk.END, "\n")
-            table_frame.update_idletasks()
+            # OPTIMIZATION: Removed table_frame.update_idletasks() - it's very slow in a loop
             self.text_widget.window_create(tk.END, window=table_frame)
             self.text_widget.insert(tk.END, "\n ") 
             
@@ -109,12 +116,4 @@ class MarkdownEngine:
             pass
 
     def get_token_text(self, children):
-        text = ""
-        for child in children:
-            if 'raw' in child:
-                text += child['raw']
-            elif 'text' in child:
-                text += child['text']
-            elif 'children' in child:
-                text += self.get_token_text(child['children'])
-        return text
+        return "".join([c.get('raw', c.get('text', self.get_token_text(c.get('children', [])))) for c in children])

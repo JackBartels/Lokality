@@ -18,7 +18,6 @@ class CustomScrollbar(tk.Canvas):
         self.bind("<Button-1>", self.on_scroll)
 
     def set(self, low, high):
-        self.delete(self.thumb_id)
         height = self.winfo_height()
         if height <= 1: return
         
@@ -31,7 +30,9 @@ class CustomScrollbar(tk.Canvas):
             y1 -= diff
             y2 = height
 
-        self.thumb_id = round_rectangle(self, 2, y1, 10, y2, radius=self.radius, fill=self.thumb_color)
+        # Update coordinates instead of deleting and re-creating
+        points = [2+self.radius, y1, 2+self.radius, y1, 10-self.radius, y1, 10-self.radius, y1, 10, y1, 10, y1+self.radius, 10, y1+self.radius, 10, y2-self.radius, 10, y2-self.radius, 10, y2, 10-self.radius, y2, 10-self.radius, y2, 2+self.radius, y2, 2+self.radius, y2, 2, y2, 2, y2-self.radius, 2, y2-self.radius, 2, y1+self.radius, 2, y1+self.radius, 2, y1]
+        self.coords(self.thumb_id, *points)
 
     def on_scroll(self, event):
         height = self.winfo_height()
