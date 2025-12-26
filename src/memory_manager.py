@@ -2,8 +2,10 @@ import json
 import re
 import ast
 import os
-from config import MODEL_NAME, DEBUG
+import config
+from config import MODEL_NAME
 import ollama
+from utils import debug_print
 
 client = ollama.Client()
 
@@ -26,11 +28,13 @@ class MemoryManager:
             "STRICT DEDUPLICATION PROTOCOL:\n"
             "1. ENTITY SCAN: Check CURRENT MEMORY for the specific entity.\n"
             "2. MULTIPLE ENTRIES ALLOWED: Each entity can have unlimited distinct, non-overlapping facts. Do NOT merge unrelated facts. Preserving multiple specific details is better than overwriting them with a single general statement.\n"
-            "3. HIGH RESISTANCE TO CHANGE: Be extremely resistant to modifying or removing existing memories. Only use 'update' or 'remove' if the User EXPLICITLY and DIRECTLY confirms that the existing memory is now incorrect or outdated. If there is any doubt, keep the existing memory and add the new info as a separate entry if it's distinct. DO NOT update a fact just because the wording is slightly different.\n"
-            "4. SEMANTIC MATCH: If a fact is conceptually identical to one already known for that entity, return [].\n"
-            "5. PRESERVATION: Never overwrite valid long-term memories arbitrarily.\n"
-            "- IDENTITY FACTS: Be careful with names and nicknames. Only update them if the user indicates a change or correction.\n"
-            "- MINIMAL UPDATES: Prefer adding a new fact over updating an old one unless it's a direct correction. For example, if you know the user likes Pizza and they say they like Burgers, ADD 'Likes Burgers' instead of replacing 'Likes Pizza'.\n\n"
+            "3. VERY RARE OPERATIONS: 'update' and 'remove' are extremely rare. ONLY use them if the User explicitly negates a previous fact (e.g., 'I don't play guitar anymore' or 'I moved from X to Y').\n"
+            "4. PREFER REDUNDANCY: It is always better to have two distinct facts (e.g., 'Likes Pizza' and 'Likes Burgers') than to overwrite one. Accumulate information instead of replacing it.\n"
+            "5. SEMANTIC MATCH: If a fact is conceptually identical to one already known for that entity, return [].\n"
+            "6. GOLDEN RULES FOR OPERATIONS:\n"
+            "- ALWAYS USE 'add' for new preferences, interests, tools, or attributes, even if similar to existing ones.\n"
+            "- ONLY USE 'update' for direct, explicit corrections of historical facts (e.g., change of city, change of job title).\n"
+            "- NEVER USE 'update' to refine phrasing. If the user says something slightly differently, either 'add' it as a new distinct detail or ignore it.\n\n"
             "SOURCE RESTRICTION:\n"
             "- ONLY record facts that were explicitly stated, confirmed, or assigned by the User in their input.\n"
             "- You may record facts about 'The Assistant' (e.g., a name the user gives you) or other entities, but the information must originate from the User.\n\n"
@@ -42,14 +46,17 @@ class MemoryManager:
             "- Output exactly ONE JSON list.\n"
             "- Use ONLY 'add', 'remove', or 'update' as operations. Do NOT use 'create'.\n"
             "- METADATA WARNING: Never include '(ID: #)' inside the 'fact' string. The ID belongs only in the 'id' field for updates.\n"
-            "- Example Update: [{'op': 'update', 'id': 46, 'entity': 'The User', 'fact': 'Moved from Paraguay to Minnesota'}]"
+            "- Example Add: [{'op': 'add', 'entity': 'The User', 'fact': 'Likes spicy food'}]\n"
+            "- Example Update (Correction): [{'op': 'update', 'id': 46, 'entity': 'The User', 'fact': 'Moved from Paraguay to Minnesota'}]"
         )
         
         user_prompt = (
             f"### CURRENT MEMORY:\n{current_memory_text}\n\n"
             f"### CONTEXT (Assistant's previous response):\n{assistant_response}\n\n"
             f"### NEW USER INPUT (Extract ONLY from here):\n{user_input}\n\n"
-            "Task: Extract permanent facts strictly from the User's input. Use the Assistant's response only for context to understand the User. Use existing IDs for updates. Return [] if no NEW permanent info was shared by the user."
+            "Task: Extract permanent facts STRICTLY from the User's input. Use the Assistant's response ONLY for context to understand the User. "
+            "ONLY use 'update' if the user is explicitly correcting an existing fact shown in CURRENT MEMORY. Otherwise, use 'add' for all new information. "
+            "Return [] if no NEW permanent info was shared."
         )
 
         try:
@@ -59,8 +66,7 @@ class MemoryManager:
             ])
             response_text = res['message']['content'].strip()
             
-            if os.environ.get("DEBUG") == "1":
-                print(f"\033[90m[*] Memory: LLM Raw Response: {response_text}\033[0m")
+            debug_print(f"[*] Memory: LLM Raw Response: {response_text}")
             
             # Robust extraction of all list blocks [...]
             # We use non-greedy matching to find separate lists if the LLM outputs more than one.
@@ -88,10 +94,9 @@ class MemoryManager:
                 if valid_ops:
                     return valid_ops
                 
-            if os.environ.get("DEBUG") == "1":
-                print(f"\033[90m[*] Memory: No valid operations found in: {response_text}\033[0m")
+            debug_print(f"[*] Memory: No valid operations found in: {response_text}")
                 
         except Exception as e:
-            print(f"\033[91m[*] Memory Update System Error: {e}\033[0m")
+            debug_print(f"[*] Memory Update System Error: {e}")
             
         return []

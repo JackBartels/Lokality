@@ -1,10 +1,16 @@
 import re
+import config
 
 # ANSI escape code stripper
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\-_]| \[0-?]*[ -/]*[@-~])')
 
 def strip_ansi(text):
     return ANSI_ESCAPE.sub('', text)
+
+def debug_print(msg):
+    """Prints only if DEBUG is enabled in config."""
+    if config.DEBUG:
+        print(msg)
 
 def round_rectangle(canvas, x1, y1, x2, y2, radius=25, **kwargs):
     """Draws a rounded rectangle on a Tkinter Canvas."""
