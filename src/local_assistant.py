@@ -12,7 +12,7 @@ from memory import MemoryStore
 
 # Configuration
 MODEL_NAME = os.environ.get("LOKALITY_MODEL", "gemma3:4b-it-qat")
-VERSION = "0.0.1"
+VERSION = "0.0.2"
 
 client = ollama.Client()
 
