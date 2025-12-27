@@ -13,8 +13,9 @@ class MemoryStore:
         else:
             self.db_path = db_path
             
-        # Ensure res directory exists
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        # Ensure res directory exists (skip for in-memory DB)
+        if self.db_path != ":memory:":
+            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._conn = None
         self._lock = threading.Lock()
         self._init_db()

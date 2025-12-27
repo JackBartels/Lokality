@@ -1,7 +1,7 @@
-# Lokality
+# Lokality (v0.0.3)
 
 ## Description
-Lokality is a local-first, privacy-focused desktop AI assistant. Powered by Ollama and built with Python, it provides a modern chat interface with long-term memory capabilities, real-time internet access, and deep system integration. The assistant uses a structured SQLite database to remember personal facts and preferences, ensuring a personalized experience without relying on cloud-based memory.
+Lokality is a local-first, privacy-focused desktop AI assistant wrapper. Powered by Ollama and built with Python, it provides a modern chat interface with long-term memory capabilities, real-time internet access, and many other useful features.
 
 ## Prerequisites
 - **Python 3.12+**
@@ -24,7 +24,7 @@ Lokality is a local-first, privacy-focused desktop AI assistant. Powered by Olla
 
 3. **Install dependencies**:
    ```bash
-   pip install ollama duckduckgo_search mistune
+   pip install ollama ddgs mistune
    ```
 
 4. **Pull the default model** (or your preferred model):
@@ -37,8 +37,19 @@ Lokality is a local-first, privacy-focused desktop AI assistant. Powered by Olla
    ./launch.sh
    ```
 
+## Testing
+The project includes a comprehensive suite of unit tests. To run them, execute:
+```bash
+./.venv/bin/python3 -m unittest discover tests
+```
+Alternatively, if your virtual environment is active:
+```bash
+python3 -m unittest discover tests
+```
+
 ## Features
 - **Intelligent Long-Term Memory**: Automatically extracts and stores facts about the user in a local SQLite database for future reference.
+- **Robust Fact Extraction**: Uses LLM-driven delta management to ADD, REMOVE, or UPDATE memories while filtering out transient information.
 - **Real-Time Web Search**: Dynamically decides when to search the internet using DuckDuckGo to provide up-to-date information.
 - **Model & System Info**: Use `/info` to toggle a live dashboard showing Model, Remaining Context, Long-term Memory size, and RAM/VRAM usage.
 - **Rich Text Rendering**: Full Markdown support including headers, bold/italic text, lists, clickable links, and bordered graphical tables.
