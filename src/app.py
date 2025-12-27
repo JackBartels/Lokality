@@ -20,7 +20,7 @@ import mistune
 class AssistantApp:
     def __init__(self, root):
         self.root = root
-        self.root.title(f"Lokality v{VERSION}")
+        self.root.title(f"Lokality ({VERSION})")
         self.root.geometry("900x700")
         self.root.configure(bg=Theme.BG_COLOR)
 

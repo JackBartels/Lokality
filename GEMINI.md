@@ -34,6 +34,7 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 
 ### 4. System Monitoring
 - **Live Stats**: Handled by `StatsCollector`. Real-time tracking of Ollama model resource usage, including RAM, VRAM, and estimated context window consumption.
+- **Debug Mode**: A toggleable `/debug` state that redirects internal logs and LLM reasoning processes to the terminal for real-time inspection.
 - **Visual Refinement**: Units (MB, %) are rendered in a smaller `unit` font for better visual hierarchy. Stats refresh automatically after every response.
 
 ## Project Structure
@@ -57,6 +58,12 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 
 ## Development Conventions
 
+
+
 - **Modular Design**: UI, Search, Stats, and Memory logic are strictly separated.
+
 - **Non-Blocking**: Heavy operations (LLM extraction, web search) run in background threads.
+
 - **Selective Learning**: The assistant is extractive, focusing on permanent user attributes and identity facts.
+
+- **Git Hygiene**: Do NOT perform git operations (commit, push, branch creation) unless explicitly requested by the user.
