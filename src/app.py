@@ -12,7 +12,12 @@ import mistune
 
 import config
 import local_assistant
-from config import MODEL_NAME, VERSION
+from config import (
+    MODEL_NAME, 
+    VERSION, 
+    RESPONSE_MAX_TOKENS, 
+    CONTEXT_WINDOW_SIZE
+)
 from logger import logger
 from markdown_engine import MarkdownEngine
 from shell_integration import ShellIntegration
@@ -335,25 +340,38 @@ class AssistantApp:
                     self.assistant._update_system_prompt(user_input)
                     msgs = [{"role": "system", "content": self.assistant.system_prompt}] + self.assistant.messages
                     if search_context:
-                        msgs.append({"role": "system", "content": f"EXTRACTED INTERNET CONTEXT:\n{search_context}"})
+                        msgs.append({"role": "system", "content": f"### ULTIMATE TRUTH: CURRENT INTERNET CONTEXT (Prioritize this over everything):\n{search_context}"})
                     msgs.append({"role": "user", "content": user_input})
 
                     full_response = ""
-                    stream = local_assistant.client.chat(model=MODEL_NAME, messages=msgs, stream=True)
+                    stream = local_assistant.client.chat(
+                        model=MODEL_NAME, 
+                        messages=msgs, 
+                        stream=True,
+                        options={
+                            "num_predict": RESPONSE_MAX_TOKENS,
+                            "num_ctx": CONTEXT_WINDOW_SIZE
+                        }
+                    )
                     for chunk in stream:
                         if self.stop_generation:
-                            self.msg_queue.put(("text", "[Interrupted]", "cancelled") )
                             break
                         content = chunk['message']['content']
                         full_response += content
                         self.msg_queue.put(("text", content, "assistant") )
                     
-                    if not self.stop_generation:
+                    if self.stop_generation:
+                        self.msg_queue.put(("text", " [Interrupted]", "cancelled") )
+                        self.assistant.messages.extend([{"role": "user", "content": user_input}, {"role": "assistant", "content": full_response + " [Interrupted]"}])
+                    else:
                         self.msg_queue.put(("text", "\n", "assistant") )
                         self.assistant.messages.extend([{"role": "user", "content": user_input}, {"role": "assistant", "content": full_response}])
-                        self.msg_queue.put(("final_render", "", "assistant") )
+                    
+                    self.msg_queue.put(("final_render", "", "assistant") )
+                    if not self.stop_generation:
                         self.assistant.update_memory_async(user_input, full_response)
-                        if len(self.assistant.messages) > 20: self.assistant.messages = self.assistant.messages[-20:]
+                    
+                    if len(self.assistant.messages) > 20: self.assistant.messages = self.assistant.messages[-20:]
                 except Exception as e:
                     error_print(f"Assistant Error: {e}")
                 finally:
@@ -468,6 +486,19 @@ class AssistantApp:
             w = max(600, self.chat_display.winfo_width() - 40)
             canv = tk.Canvas(self.chat_display, bg=Theme.BG_COLOR, height=height, highlightthickness=0, width=w)
             canv.create_line(10, height//2, w-10, height//2, fill=Theme.SEPARATOR_COLOR)
+            
+            # Fix: Bind mouse wheel to propagate scroll to parent text widget
+            def _on_mousewheel(event):
+                self.chat_display.yview_scroll(int(-1*(event.delta/120)), "units")
+            def _on_linux_scroll_up(event):
+                self.chat_display.yview_scroll(-1, "units")
+            def _on_linux_scroll_down(event):
+                self.chat_display.yview_scroll(1, "units")
+            
+            canv.bind("<MouseWheel>", _on_mousewheel)
+            canv.bind("<Button-4>", _on_linux_scroll_up)
+            canv.bind("<Button-5>", _on_linux_scroll_down)
+
             self.chat_display.window_create(tk.END, window=canv)
             self.chat_display.insert(tk.END, "\n")
         except:

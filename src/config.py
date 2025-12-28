@@ -3,6 +3,12 @@ import os
 VERSION = "v0.0.4"
 MODEL_NAME = os.environ.get("LOKALITY_MODEL", "gemma3:4b-it-qat")
 
+# Model performance tuning
+SEARCH_DECISION_MAX_TOKENS = 30
+RESPONSE_MAX_TOKENS = 300
+MEMORY_EXTRACTION_MAX_TOKENS = 200
+CONTEXT_WINDOW_SIZE = 4096
+
 # This can be toggled at runtime via /debug
 DEBUG = os.environ.get("DEBUG", "0") == "1"
 

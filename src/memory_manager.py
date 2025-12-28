@@ -4,7 +4,7 @@ import re
 
 import ollama
 
-from config import MODEL_NAME
+from config import MODEL_NAME, MEMORY_EXTRACTION_MAX_TOKENS, CONTEXT_WINDOW_SIZE
 from logger import logger
 from utils import debug_print, error_print
 
@@ -23,7 +23,8 @@ class MemoryManager:
             "at the moment", "today is", "tonight", "tomorrow", "yesterday", 
             "language model", "conversation turn", "current time", "the time is",
             "wants to know", "wants", "is currently", "is doing", "currently wants",
-            "just did", "recently did", "asked me", "requested", "cleared", "deleted"
+            "just did", "recently did", "asked me", "requested", "cleared", "deleted",
+            "asks about", "asked about", "searching for", "searched for"
         }
         fact_lower = fact.lower()
         if any(key in fact_lower for key in forbidden):
@@ -37,7 +38,9 @@ class MemoryManager:
         system_instructions = (
             "You are a high-precision Memory Management Module.\n\n"
             "ENTITY STANDARDIZATION:\n"
-            "- Entities can be 'The User', 'The Assistant', or any specific person, place, or thing mentioned by the user that has long-term relevance.\n\n"
+            "- Extract the specific subject of the fact as the Entity (e.g., 'Elon Musk', 'Tallinn', 'NVIDIA', 'The Assistant').\n"
+            "- ONLY use 'The User' for facts about the user's personal identity, preferences, or history.\n"
+            "- If a fact is about a global event, organization, or public figure, use that specific name as the Entity.\n\n"
             "CRITICAL CATEGORIES:\n"
             "- Identity (Names, long-term roles, occupations, residence, hometown).\n"
             "- Permanent Interests (Broad goals, ongoing learning).\n"
@@ -49,6 +52,7 @@ class MemoryManager:
             "- PRESENT WANTS & IMMEDIATE ACTIONS: NEVER record what the user currently wants to do, see, or know in the context of the chat (e.g., 'Wants to see the code', 'Wants to clear the screen', 'Is currently looking at a file').\n"
             "- CURRENT & RECENT ACTIONS: NEVER record what the user or assistant IS currently doing or JUST did within the conversation (e.g., 'User is asking a question', 'Assistant is explaining logic', 'User just cleared the memory').\n"
             "- TRANSIENT REQUESTS: Do not record temporary requests like 'Show me a joke' or 'Tell me a story'.\n"
+            "- QUESTIONS & TOPICS: NEVER record that a user 'Asks about [topic]' or 'Is curious about [X]'. Questions are not permanent facts about the user's identity.\n"
             "- TRANSIENT INFO: Obvious AI/Assistant roles, transient moods, current weather/time, temporary events, or conversational filler.\n\n"
             "OKAY TO RECORD:\n"
             "- LONG-TERM ASPIRATIONS: Only record goals, future plans, or enduring desires that define the user's personality or life path (e.g., 'Aims to learn Rust', 'Wants to move to Italy in 2026').\n\n"
@@ -66,15 +70,15 @@ class MemoryManager:
             "- ONLY record facts that were explicitly stated, confirmed, or assigned by the User in their input.\n"
             "- You may record facts about 'The Assistant' (e.g., a name the user gives you) or other entities, but the information must originate from the User.\n\n"
             "EFFICIENCY & SCOPE:\n"
+            "- ATOMIC EVALUATION: Evaluate each potential piece of information individually. Treat every possible fact as a standalone candidate for memory. Just because one fact in a sentence is recordable does not mean other facts in the same sentence are.\n"
             "- Only suggest an operation if there is a MEANINGFUL change to long-term memory. Do not update for trivial variations in phrasing.\n"
             "- You can perform MULTIPLE operations (add, update, remove) in a single response by including them all in the list.\n"
             "- If nothing meaningful has changed, return an empty list [].\n\n"
             "FORMATTING:\n"
-            "- Output exactly ONE JSON list.\n"
-            "- Use ONLY 'add', 'remove', or 'update' as operations. Do NOT use 'create'.\n"
-            "- METADATA WARNING: Never include '(ID: #)' inside the 'fact' string. The ID belongs only in the 'id' field for updates.\n"
-            "- Example Add: [{'op': 'add', 'entity': 'The User', 'fact': 'Likes spicy food'}]\n"
-            "- Example Update (Correction): [{'op': 'update', 'id': 46, 'entity': 'The User', 'fact': 'Moved from Paraguay to Minnesota'}]"
+            "- Output ONLY the JSON block. Do not include 'Here is the JSON' or any conversational text.\n"
+            "- Use ONLY 'add', 'remove', or 'update' as operations.\n"
+            "- Example Add: [{'op': 'add', 'entity': 'Elon Musk', 'fact': 'CEO of SpaceX'}]\n"
+            "- Example No Changes: []"
         )
         
         user_prompt = (
@@ -87,25 +91,30 @@ class MemoryManager:
         )
 
         try:
-            res = client.chat(model=MODEL_NAME, messages=[
-                {"role": "system", "content": system_instructions},
-                {"role": "user", "content": user_prompt}
-            ])
+            res = client.chat(
+                model=MODEL_NAME, 
+                messages=[
+                    {"role": "system", "content": system_instructions},
+                    {"role": "user", "content": user_prompt}
+                ],
+                options={
+                    "num_predict": MEMORY_EXTRACTION_MAX_TOKENS,
+                    "num_ctx": CONTEXT_WINDOW_SIZE
+                }
+            )
             response_text = res['message']['content'].strip()
             
             debug_print(f"[*] Memory: LLM Raw Response: {response_text}")
             
-            # Robust extraction of all list blocks [...]
-            # We use non-greedy matching to find separate lists if the LLM outputs more than one.
+            # Robust extraction of all dict/list blocks
             all_ops = []
-            for match in re.finditer(r'\[[\s\S]*?\]', response_text):
+            # Match both lists [...] and individual dicts {...}
+            for match in re.finditer(r'(\[[\s\S]*?\]|\{[\s\S]*?\})', response_text):
                 content = match.group()
                 try:
-                    # Try Python literal evaluation first (handles single quotes in strings correctly)
                     ops = ast.literal_eval(content)
                 except Exception:
                     try:
-                        # Fallback to JSON
                         ops = json.loads(content)
                     except Exception:
                         continue

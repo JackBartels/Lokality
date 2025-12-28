@@ -46,6 +46,23 @@ class MarkdownEngine:
         url = self._get_url_at_index(f"@{event.x},{event.y}")
         self.tooltip_callback(event, url)
 
+    def _bind_scroll(self, widget):
+        """Helper to propagate scroll events from embedded widgets to the main text area."""
+        def _on_mousewheel(event):
+            self.text_widget.yview_scroll(int(-1*(event.delta/120)), "units")
+        def _on_linux_scroll_up(event):
+            self.text_widget.yview_scroll(-1, "units")
+        def _on_linux_scroll_down(event):
+            self.text_widget.yview_scroll(1, "units")
+            
+        widget.bind("<MouseWheel>", _on_mousewheel)
+        widget.bind("<Button-4>", _on_linux_scroll_up)
+        widget.bind("<Button-5>", _on_linux_scroll_down)
+        
+        # Also bind for all children if any (e.g. Labels in a Table Frame)
+        for child in widget.winfo_children():
+            self._bind_scroll(child)
+
     def render_tokens(self, tokens, base_tag, extra_tags=None, level=0):
         # Accumulate tags for nested styling
         style_tags = []
@@ -97,6 +114,7 @@ class MarkdownEngine:
         w = max(400, self.text_widget.winfo_width() - 60)
         canv = tk.Canvas(self.text_widget, bg=Theme.BG_COLOR, height=6, highlightthickness=0, width=w)
         canv.create_line(0, 3, w, 3, fill=Theme.ACCENT_COLOR, width=4)
+        self._bind_scroll(canv)
         self.text_widget.insert(tk.END, "\n")
         self.text_widget.window_create(tk.END, window=canv)
         self.text_widget.insert(tk.END, "\n\n")
@@ -177,6 +195,7 @@ class MarkdownEngine:
 
             for j in range(len(header_cells)): table_frame.grid_columnconfigure(j, weight=1)
 
+            self._bind_scroll(table_frame)
             self.text_widget.insert(tk.END, "\n")
             self.text_widget.window_create(tk.END, window=table_frame)
             self.text_widget.insert(tk.END, "\n")
