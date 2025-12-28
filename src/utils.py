@@ -1,4 +1,5 @@
 import re
+import sys
 import config
 
 # ANSI escape code stripper
@@ -7,26 +8,80 @@ ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\-_]| \[0-?]*[ -/]*[@-~])')
 def strip_ansi(text):
     return ANSI_ESCAPE.sub('', text)
 
+def format_error_msg(e):
+    """Converts technical exceptions into user-friendly strings."""
+    err_str = str(e)
+    # Check for Ollama connection refusal
+    if "Connection refused" in err_str or "[Errno 111]" in err_str:
+        return "Unable to connect to Ollama. Ensure the service is running."
+    return err_str
+
 def debug_print(msg):
-    """Prints only if DEBUG is enabled in config."""
+    """Prints to the current stdout if DEBUG is enabled. 
+    This allows messages to be captured by GUI redirection."""
     if config.DEBUG:
-        print(msg)
+        print(f"DEBUG: {msg}")
+
+def error_print(msg):
+    """Prints to stderr regardless of debug mode. These appear in the GUI chat."""
+    import sys
+    print(f"Error: {msg}", file=sys.stderr)
 
 def round_rectangle(canvas, x1, y1, x2, y2, radius=25, **kwargs):
     """Draws a rounded rectangle on a Tkinter Canvas."""
+    # Ensure radius doesn't exceed dimensions to avoid visual glitches
+    w = abs(x2 - x1)
+    h = abs(y2 - y1)
+    if radius > w // 2: radius = max(1, w // 2)
+    if radius > h // 2: radius = max(1, h // 2)
+    
     points = [x1+radius, y1, x1+radius, y1, x2-radius, y1, x2-radius, y1, x2, y1, x2, y1+radius, x2, y1+radius, x2, y2-radius, x2, y2-radius, x2, y2, x2-radius, y2, x2-radius, y2, x1+radius, y2, x1+radius, y2, x1, y2, x1, y2-radius, x1, y2-radius, x1, y1+radius, x1, y1+radius, x1, y1]
     return canvas.create_polygon(points, **kwargs, smooth=True)
+
+def verify_env_health():
+    """Performs critical startup checks. Returns (True, []) or (False, [errors])."""
+    errors = []
+    debug_print("[*] Performing environment health checks...")
+    
+    # 1. Ollama & 2. Resource Permissions
+    try:
+        import ollama
+        ollama.Client().list()
+    except Exception as e:
+        errors.append(format_error_msg(e))
+
+    import os
+    res_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "res")
+    try:
+        os.makedirs(res_dir, exist_ok=True)
+        test_file = os.path.join(res_dir, ".write_test")
+        with open(test_file, "w") as f: f.write("test")
+        os.remove(test_file)
+    except Exception as e:
+        errors.append(f"Cannot write to '{res_dir}': {e}")
+
+    if not errors: debug_print("[*] Environment check passed.")
+    return len(errors) == 0, errors
 
 class RedirectedStdout:
     def __init__(self, queue, tag="system"):
         self.queue = queue
         self.tag = tag
+        self._original_stdout = sys.__stdout__
 
     def write(self, string):
         if string:
             clean = strip_ansi(string)
             if clean:
+                # Normal prints go to GUI
                 self.queue.put(("text", clean, self.tag))
+                # Also mirror to terminal if debugging
+                if config.DEBUG:
+                    try:
+                        self._original_stdout.write(string)
+                        self._original_stdout.flush()
+                    except:
+                        pass
 
     def flush(self):
         pass

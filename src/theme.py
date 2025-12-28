@@ -35,11 +35,13 @@ class Theme:
             "base": (base_family, 11),
             "bold": (base_family, 11, "bold"),
             "italic": (base_family, 11, "italic"),
+            "bold_italic": (base_family, 11, "bold italic"),
             "small": (base_family, 11, "italic"),
+            "small_base": (base_family, 8),
             "code": (code_family, 10),
-            "h1": (base_family, 16, "bold"),
-            "h2": (base_family, 14, "bold"),
-            "h3": (base_family, 12, "bold"),
+            "h1": (base_family, 20, "bold"),
+            "h2": (base_family, 17, "bold"),
+            "h3": (base_family, 14, "bold"),
             "unit": (base_family, 9, "bold"),
             "tooltip": (base_family, 9)
         }
