@@ -1,6 +1,6 @@
 import tkinter as tk
-import mistune
 import webbrowser
+
 from theme import Theme
 
 class MarkdownEngine:

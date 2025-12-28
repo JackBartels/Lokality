@@ -1,8 +1,10 @@
-import sqlite3
 import os
 import re
+import sqlite3
 import threading
 import time
+
+from logger import logger
 from utils import debug_print, error_print
 
 def retry_on_busy(max_retries=5, delay=0.1):
@@ -79,7 +81,7 @@ class MemoryStore:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_created ON memory(created_at)")
                 conn.commit()
         except sqlite3.Error as e:
-            debug_print(f"[*] Memory: Database error: {e}. Resetting...")
+            error_print(f"Database initialization error: {e}. Resetting...")
             self._reset_corrupted_db()
 
     def _reset_corrupted_db(self):
@@ -92,7 +94,7 @@ class MemoryStore:
                 error_print(f"Database corruption detected. Original moved to {bak_path}")
             self._init_db()
         except Exception as e:
-            debug_print(f"[*] Memory: CRITICAL: Could not reset database: {e}")
+            error_print(f"CRITICAL: Could not reset database: {e}")
 
     def _get_conn(self):
         with self._lock:

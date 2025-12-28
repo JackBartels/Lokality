@@ -62,6 +62,7 @@ python3 -m unittest discover tests
     - Clickable links with tooltips.
 - **Modern GUI**: A sleek, blue-toned desaturated purple interface featuring 6px thick rounded borders, dynamic message separators, and a responsive flow layout.
 - **Smart Input**: A dynamic input box that expands vertically as you type (including automatic expansion for word-wrapped lines) and features tab-completion for slash commands.
+- **Persistent Logging**: Centralized logging system that records session details to the `logs/` directory with automatic cleanup of files older than 30 days.
 - **Optimized Architecture**: Refactored with a dispatcher-based rendering engine and consolidated background process management for improved performance and maintainability.
 - **Model Agnostic**: Can be configured to work with any local model available via Ollama using the `LOKALITY_MODEL` environment variable.
 

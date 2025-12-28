@@ -40,9 +40,10 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 - **Search Engine**: A decoupled module using DuckDuckGo to fetch real-time data when the LLM determines it is necessary.
 - **Bypass Mode**: A raw shell integration using PTY (Pseudo-Terminal) allows users to bypass the assistant logic and speak directly to the Ollama CLI wrapper.
 
-### 4. System Monitoring
+### 4. System Monitoring & Logging
 - **Live Stats**: Handled by `StatsCollector`. Real-time tracking of Ollama model resource usage, including RAM, VRAM, and estimated context window consumption.
 - **Visual Refinement**: Units (MB, %) are rendered in a smaller `unit` font for better visual hierarchy. Stats refresh automatically after every response.
+- **Persistent Logging**: A centralized `logger.py` module handles timestamped logs in the `logs/` directory. Features automatic log rotation/cleanup (keeps logs for 30 days) and simultaneous stream/file output.
 
 ## Project Structure
 
@@ -51,6 +52,7 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
   - `config.py`: Global constants.
   - `theme.py`: UI styling, colors, and font definitions.
   - `markdown_engine.py`: Dispatcher-based logic for rendering Markdown tokens into Tkinter widgets. Supports complex nesting and modern Mistune plugins.
+  - `logger.py`: Centralized logging configuration with automatic file-based persistence and cleanup logic.
   - `shell_integration.py`: PTY-based logic for the direct Ollama bypass.
   - `local_assistant.py`: Core logic for conversation management and system prompt templating.
   - `memory.py`: Low-level SQLite database interface with FTS5 triggers.
