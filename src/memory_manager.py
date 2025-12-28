@@ -11,6 +11,26 @@ client = ollama.Client()
 
 class MemoryManager:
     @staticmethod
+    def validate_fact_content(fact):
+        """Returns True if the fact is suitable for long-term storage."""
+        if not fact or len(fact.strip()) < 3:
+            return False
+            
+        # Hard Filter: Block transient info
+        forbidden = {
+            "temperature", "humidity", "weather", "forecast", "currently is", 
+            "at the moment", "today is", "tonight", "tomorrow", "yesterday", 
+            "language model", "conversation turn", "current time", "the time is",
+            "wants to know", "wants", "is currently", "is doing", "currently wants",
+            "just did", "recently did", "asked me", "requested", "cleared", "deleted"
+        }
+        fact_lower = fact.lower()
+        if any(key in fact_lower for key in forbidden):
+            return False
+            
+        return True
+
+    @staticmethod
     def extract_facts(user_input, assistant_response, current_memory_text):
         """Delta-based memory update using structured operations."""
         system_instructions = (
@@ -20,11 +40,17 @@ class MemoryManager:
             "CRITICAL CATEGORIES:\n"
             "- Identity (Names, long-term roles, occupations, residence, hometown).\n"
             "- Permanent Interests (Broad goals, ongoing learning).\n"
-            "- Preferences & Tools (Static likes/dislikes).\n"
+            "- Preferences & Tools (Static likes/dislikes). ONLY record if the user EXPLICITLY states a preference (e.g., 'I like X' or 'I love X').\n"
             "- Entity Attributes (Permanent facts about people, places, or the Assistant itself).\n\n"
             "DO NOT RECORD:\n"
             "### GOLDEN RULE: If a piece of information will not still be relevant or true in ONE MONTH, do NOT record it. ###\n"
-            "- Obvious AI/Assistant roles, transient moods, current weather/time, temporary events, or conversational filler.\n\n"
+            "- INFERRED PREFERENCES: NEVER infer that a user likes or prefers something just because they asked about it or are currently using it (e.g., if a user asks for a pizza recipe, do NOT record 'Likes pizza' unless they explicitly say so).\n"
+            "- PRESENT WANTS & IMMEDIATE ACTIONS: NEVER record what the user currently wants to do, see, or know in the context of the chat (e.g., 'Wants to see the code', 'Wants to clear the screen', 'Is currently looking at a file').\n"
+            "- CURRENT & RECENT ACTIONS: NEVER record what the user or assistant IS currently doing or JUST did within the conversation (e.g., 'User is asking a question', 'Assistant is explaining logic', 'User just cleared the memory').\n"
+            "- TRANSIENT REQUESTS: Do not record temporary requests like 'Show me a joke' or 'Tell me a story'.\n"
+            "- TRANSIENT INFO: Obvious AI/Assistant roles, transient moods, current weather/time, temporary events, or conversational filler.\n\n"
+            "OKAY TO RECORD:\n"
+            "- LONG-TERM ASPIRATIONS: Only record goals, future plans, or enduring desires that define the user's personality or life path (e.g., 'Aims to learn Rust', 'Wants to move to Italy in 2026').\n\n"
             "STRICT DEDUPLICATION PROTOCOL:\n"
             "1. ENTITY SCAN: Check CURRENT MEMORY for the specific entity.\n"
             "2. MULTIPLE ENTRIES ALLOWED: Each entity can have unlimited distinct, non-overlapping facts. Do NOT merge unrelated facts. Preserving multiple specific details is better than overwriting them with a single general statement.\n"
@@ -89,8 +115,21 @@ class MemoryManager:
                     all_ops.append(ops)
             
             if all_ops:
-                # Basic validation: ensure we only process dicts with an 'op' key
-                valid_ops = [op for op in all_ops if isinstance(op, dict) and 'op' in op]
+                # Basic validation: ensure we only process dicts with an 'op' key and valid content
+                valid_ops = []
+                for op in all_ops:
+                    if not isinstance(op, dict) or 'op' not in op:
+                        continue
+                        
+                    # Validate content for add/update
+                    if op['op'] in ['add', 'update']:
+                        fact = op.get('fact', '')
+                        if not MemoryManager.validate_fact_content(fact):
+                            debug_print(f"[*] Memory: Filtering invalid fact content: {fact[:40]}...")
+                            continue
+                    
+                    valid_ops.append(op)
+                
                 if valid_ops:
                     return valid_ops
                 
