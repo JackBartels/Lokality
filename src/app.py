@@ -1,28 +1,36 @@
-import tkinter as tk
-from tkinter import font, ttk
-import threading
-import queue
-import sys
+import logging
 import os
+import queue
 import signal
-
+import sys
+import threading
+import tkinter as tk
 import traceback
+from tkinter import font
 
-# Local imports
+import mistune
+
 import config
-from config import VERSION, MODEL_NAME
-from theme import Theme
-from utils import RedirectedStdout, round_rectangle, debug_print, format_error_msg
-from ui_components import CustomScrollbar, InfoPanel
+import local_assistant
+from config import MODEL_NAME, VERSION
+from logger import logger
 from markdown_engine import MarkdownEngine
 from shell_integration import ShellIntegration
-import local_assistant
-import mistune
+from theme import Theme
+from ui_components import CustomScrollbar, InfoPanel
+from utils import (
+    RedirectedStdout,
+    debug_print,
+    error_print,
+    format_error_msg,
+    info_print,
+    round_rectangle,
+)
 
 def thread_excepthook(args):
     """Global hook for catching uncaught exceptions in threads."""
     err_msg = f"Thread Error ({args.thread.name}): {args.exc_type.__name__}: {args.exc_value}"
-    print(err_msg, file=sys.stderr)
+    error_print(err_msg)
     if config.DEBUG:
         traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback)
 
@@ -80,7 +88,7 @@ class AssistantApp:
         sys.stdout = RedirectedStdout(self.msg_queue, "system")
         sys.stderr = RedirectedStdout(self.msg_queue, "error")
 
-        print(f"Lokality {VERSION} starting...")
+        info_print(f"Lokality {VERSION} starting...")
         
         # Run initialization and health checks in background
         threading.Thread(target=self.initialize_async, daemon=True).start()
@@ -89,21 +97,21 @@ class AssistantApp:
         """Heavy initialization tasks run in background."""
         try:
             self.assistant = local_assistant.LocalChatAssistant()
-            print("Chat Assistant ready.")
+            info_print("Chat Assistant ready.")
             
             from utils import verify_env_health
             success, errors = verify_env_health()
             for err in errors:
-                print(f"CRITICAL ERROR: {err}")
+                error_print(f"Environment check failed: {err}")
             
             print("Type /help for commands.\n")
         except Exception as e:
-            print(f"CRITICAL ERROR: Initialization failed: {format_error_msg(e)}")
+            error_print(f"Initialization failed: {format_error_msg(e)}")
 
     def handle_tk_exception(self, exc, val, tb):
         """Global hook for catching Tkinter callback exceptions."""
         err_msg = f"GUI Error: {exc.__name__}: {val}"
-        print(err_msg, file=sys.stderr)
+        error_print(err_msg)
         if config.DEBUG:
             traceback.print_exception(exc, val, tb)
 
@@ -347,7 +355,7 @@ class AssistantApp:
                         self.assistant.update_memory_async(user_input, full_response)
                         if len(self.assistant.messages) > 20: self.assistant.messages = self.assistant.messages[-20:]
                 except Exception as e:
-                    self.msg_queue.put(("text", f"Error: {format_error_msg(e)}\n", "error") )
+                    error_print(f"Assistant Error: {e}")
                 finally:
                     self.msg_queue.put(("enable", None, None))
 
@@ -359,24 +367,28 @@ class AssistantApp:
 
     # --- Command Handlers ---
     def _cmd_exit(self, _):
+        logger.info("Exit command received.")
         self.msg_queue.put(("quit", None, None))
 
     def _cmd_clear(self, _):
         if not self.assistant: return
         self.assistant.messages = []
         self.markdown_engine.clear()
-        debug_print("[*] Conversation memory cleared.")
+        info_print("Conversation history cleared.")
         self.msg_queue.put(("clear", None, None))
         self.msg_queue.put(("enable", None, None))
 
     def _cmd_forget(self, _):
         if not self.assistant: return
+        info_print("Requesting to forget long-term memory...")
         self.assistant.clear_long_term_memory()
         self.msg_queue.put(("enable", None, None))
 
     def _cmd_debug(self, _):
         config.DEBUG = not config.DEBUG
-        print(f"[*] Debug mode {'ENABLED' if config.DEBUG else 'DISABLED'}")
+        msg = f"[*] Debug mode {'ENABLED' if config.DEBUG else 'DISABLED'}"
+        info_print(msg)
+        logger.setLevel(logging.DEBUG if config.DEBUG else logging.INFO)
         self.msg_queue.put(("enable", None, None))
 
     def _cmd_info(self, _):
@@ -384,6 +396,7 @@ class AssistantApp:
         self.msg_queue.put(("enable", None, None))
 
     def _cmd_help(self, _):
+        logger.info("Help command invoked.")
         help_text = "Available Commands:\n" + "\n".join([f"    {c}\t{d}" for c, d in self.SLASH_COMMANDS])
         print(help_text)
         self.msg_queue.put(("separator", None, None))
@@ -391,6 +404,7 @@ class AssistantApp:
 
     def _cmd_bypass(self, user_input):
         raw = user_input[7:].strip()
+        logger.info(f"Bypass command invoked: {raw[:50]}...")
         if not raw:
             self.msg_queue.put(("text", "Usage: /bypass <prompt>\n", "system") )
         else:

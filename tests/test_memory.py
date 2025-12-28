@@ -1,7 +1,9 @@
-import unittest
 import os
-import sqlite3
 import sys
+import threading
+import unittest
+
+from memory import MemoryStore
 
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -60,8 +62,6 @@ class TestMemoryStore(unittest.TestCase):
         self.assertEqual(self.store.get_fact_count(), 0)
 
     def test_concurrent_writes(self):
-        import threading
-        
         def add_facts(count, start_index):
             for i in range(count):
                 self.store.add_fact("User", f"Fact {start_index + i}")

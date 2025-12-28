@@ -1,11 +1,12 @@
+import ast
 import json
 import re
-import ast
-import os
-import config
-from config import MODEL_NAME
+
 import ollama
-from utils import debug_print
+
+from config import MODEL_NAME
+from logger import logger
+from utils import debug_print, error_print
 
 client = ollama.Client()
 
@@ -136,6 +137,6 @@ class MemoryManager:
             debug_print(f"[*] Memory: No valid operations found in: {response_text}")
                 
         except Exception as e:
-            debug_print(f"[*] Memory Update System Error: {e}")
+            error_print(f"Memory Update System Error: {e}")
             
         return []

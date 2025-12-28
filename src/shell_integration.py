@@ -1,14 +1,17 @@
 import os
 import pty
 import select
-import signal
 import subprocess
+
 from config import MODEL_NAME
+from logger import logger
+from utils import error_print
 
 class ShellIntegration:
     @staticmethod
     def run_ollama_bypass(prompt, msg_queue, stop_check_callback):
         """Runs Ollama in bypass mode using a PTY for raw CLI interaction."""
+        logger.info(f"Starting bypass mode for prompt: {prompt[:50]}...")
         try:
             master, slave = pty.openpty()
             new_env = os.environ.copy()
@@ -80,7 +83,7 @@ class ShellIntegration:
             return full_response, process
             
         except Exception as e:
-            msg_queue.put(("text", f"Error in bypass: {e}\n", "error"))
+            error_print(f"Error in bypass: {e}")
             return None, None
         finally:
             try:

@@ -1,6 +1,10 @@
+import os
 import re
 import sys
+
 import config
+
+from logger import logger
 
 # ANSI escape code stripper
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\-_]| \[0-?]*[ -/]*[@-~])')
@@ -17,15 +21,25 @@ def format_error_msg(e):
     return err_str
 
 def debug_print(msg):
-    """Prints to the current stdout if DEBUG is enabled. 
-    This allows messages to be captured by GUI redirection."""
+    """Logs to DEBUG level and prints to stdout if DEBUG is enabled.
+    Truncates extremely long messages to prevent log/UI bloat."""
+    msg_str = str(msg)
+    if len(msg_str) > 2048:
+        msg_str = msg_str[:2048] + "... [TRUNCATED]"
+        
+    logger.debug(msg_str)
     if config.DEBUG:
-        print(f"DEBUG: {msg}")
+        print(f"DEBUG: {msg_str}")
 
 def error_print(msg):
-    """Prints to stderr regardless of debug mode. These appear in the GUI chat."""
-    import sys
+    """Logs to ERROR level and prints to stderr. These appear in the GUI chat."""
+    logger.error(msg)
     print(f"Error: {msg}", file=sys.stderr)
+
+def info_print(msg):
+    """Logs to INFO level and prints to stdout. These appear in the GUI chat."""
+    logger.info(msg)
+    print(msg)
 
 def round_rectangle(canvas, x1, y1, x2, y2, radius=25, **kwargs):
     """Draws a rounded rectangle on a Tkinter Canvas."""
@@ -41,7 +55,7 @@ def round_rectangle(canvas, x1, y1, x2, y2, radius=25, **kwargs):
 def verify_env_health():
     """Performs critical startup checks. Returns (True, []) or (False, [errors])."""
     errors = []
-    debug_print("[*] Performing environment health checks...")
+    logger.info("[*] Performing environment health checks...")
     
     # 1. Ollama & 2. Resource Permissions
     try:
@@ -50,7 +64,6 @@ def verify_env_health():
     except Exception as e:
         errors.append(format_error_msg(e))
 
-    import os
     res_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "res")
     try:
         os.makedirs(res_dir, exist_ok=True)
@@ -60,7 +73,7 @@ def verify_env_health():
     except Exception as e:
         errors.append(f"Cannot write to '{res_dir}': {e}")
 
-    if not errors: debug_print("[*] Environment check passed.")
+    if not errors: logger.info("[*] Environment check passed.")
     return len(errors) == 0, errors
 
 class RedirectedStdout:

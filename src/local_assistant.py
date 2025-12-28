@@ -1,16 +1,16 @@
-import ollama
 from datetime import datetime
-import threading
-import os
 import re
+import threading
 
-import config
+import ollama
+
 from config import MODEL_NAME, VERSION
+from logger import logger
 from memory import MemoryStore
 from memory_manager import MemoryManager
 from search_engine import SearchEngine
 from stats_collector import StatsCollector
-from utils import debug_print
+from utils import debug_print, error_print, info_print
 
 client = ollama.Client()
 
@@ -102,15 +102,15 @@ class LocalChatAssistant:
                 query = response[7:].strip().strip('"')
                 if query:
                     return SearchEngine.web_search(query)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Search Decision Error (Ollama): {e}")
         return None
 
     def clear_long_term_memory(self):
         """Resets the internal long-term memory."""
         self.memory.clear()
         self._update_system_prompt()
-        print("Long-term memory cleared.")
+        info_print("Long-term memory cleared.")
 
     def get_model_info(self):
         return StatsCollector.get_model_info(self.memory, self.system_prompt, self.messages)

@@ -1,9 +1,9 @@
-import unittest
 import os
-import sys
 import sqlite3
+import sys
 import threading
 import time
+import unittest
 
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
