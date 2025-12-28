@@ -1,6 +1,6 @@
 import os
 
-VERSION = "v0.0.4"
+VERSION = "v0.1.0"
 MODEL_NAME = os.environ.get("LOKALITY_MODEL", "gemma3:4b-it-qat")
 
 # Model performance tuning
