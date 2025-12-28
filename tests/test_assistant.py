@@ -48,12 +48,16 @@ class TestLocalChatAssistant(unittest.TestCase):
     @patch('local_assistant.SearchEngine.web_search')
     def test_decide_and_search_yes(self, mock_web_search):
         # Mock LLM decision to search
-        self.mock_client.generate.return_value = {'response': 'SEARCH: weather in London'}
+        self.mock_client.generate.side_effect = [
+            {'response': 'SEARCH: weather in London'},
+            {'response': 'DONE'}
+        ]
         mock_web_search.return_value = "It is sunny."
         
         result = self.assistant.decide_and_search("What is the weather?")
         
-        self.assertEqual(result, "It is sunny.")
+        self.assertIn("It is sunny.", result)
+        self.assertIn("Search for 'weather in London'", result)
         mock_web_search.assert_called_once_with("weather in London")
 
     def test_accuracy_context_incorporation(self):
@@ -69,7 +73,7 @@ class TestLocalChatAssistant(unittest.TestCase):
 
     def test_decide_and_search_no(self):
         # Mock LLM decision NOT to search
-        self.mock_client.generate.return_value = {'response': 'NO'}
+        self.mock_client.generate.return_value = {'response': 'DONE'}
         
         result = self.assistant.decide_and_search("Hello")
         
