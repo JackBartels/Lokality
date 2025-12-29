@@ -24,10 +24,11 @@ Lokality is a local-first, privacy-focused desktop AI assistant wrapper. Powered
 
 3. **Install dependencies**:
    ```bash
-   pip install ollama ddgs mistune
+   pip install ollama ddgs mistune psutil
    ```
 
-4. **Pull the default model** (or your preferred model):
+4. **Model Setup**:
+   Lokality will automatically detect your system resources (VRAM) and pull a suitable `gemma3` model on first launch if no models are found. You can also manually pull your preferred model:
    ```bash
    ollama pull gemma3:4b-it-qat
    ```
@@ -48,6 +49,7 @@ python3 -m unittest discover tests
 ```
 
 ## Features
+- **Hardware-Aware Auto-Initialization**: On first run, if no models are detected, Lokality automatically scans your system VRAM (supporting NVIDIA, AMD, and Intel) and pulls the most optimal Gemma 3 model for your hardware with real-time progress feedback.
 - **Intelligent Long-Term Memory**: Automatically extracts and stores facts about the user in a local SQLite database for future reference.
 - **Robust Fact Extraction**: Uses LLM-driven delta management to ADD, REMOVE, or UPDATE memories. It features a strict "Golden Rule" to ensure only permanent facts are stored, while transient actions, present-tense wants, and inferred preferences are strictly ignored.
 - **Real-Time Web Search**: Dynamically decides when to search the internet using DuckDuckGo to provide up-to-date information.
@@ -77,4 +79,5 @@ python3 -m unittest discover tests
 
 ## Compatibility
 - **Primary Support**: Linux (Ubuntu/Debian tested).
-- **Other Platforms**: Compatible with Windows and macOS provided Python, Tkinter, and Ollama are correctly installed.
+- **GPU Support**: NVIDIA, AMD (Discrete/Integrated), and Intel (Discrete/Integrated).
+- **Other Platforms**: Windows and macOS are **not officially supported**, though Lokality may work if Python, Tkinter, and Ollama are correctly installed.

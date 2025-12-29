@@ -1,9 +1,12 @@
+import glob
 import os
 import re
+import subprocess
 import sys
 
-import config
+import psutil
 
+import config
 from logger import logger
 
 # ANSI escape code stripper
@@ -52,6 +55,82 @@ def round_rectangle(canvas, x1, y1, x2, y2, radius=25, **kwargs):
     points = [x1+radius, y1, x1+radius, y1, x2-radius, y1, x2-radius, y1, x2, y1, x2, y1+radius, x2, y1+radius, x2, y2-radius, x2, y2-radius, x2, y2, x2-radius, y2, x2-radius, y2, x1+radius, y2, x1+radius, y2, x1, y2, x1, y2-radius, x1, y2-radius, x1, y1+radius, x1, y1+radius, x1, y1]
     return canvas.create_polygon(points, **kwargs, smooth=True)
 
+def get_system_resources():
+    """
+    Returns (total_ram_mb, total_vram_mb).
+    RAM is system RAM. VRAM is Discrete GPU VRAM (NVIDIA or AMD).
+    Returns (None, None) on failure.
+    """
+    try:
+        # 1. System RAM
+        ram_mb = psutil.virtual_memory().total // (1024 * 1024)
+        
+        # 2. VRAM
+        vram_mb = 0
+        
+        # Check NVIDIA
+        try:
+            res = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                encoding='utf-8', stderr=subprocess.DEVNULL
+            )
+            for line in res.strip().split('\n'):
+                if line.strip():
+                    vram_mb += int(line.strip())
+        except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+            pass
+            
+        # Check AMD (Direct Rendering Manager sysfs)
+        # We look for 'mem_info_vram_total' which is typically exposed for Discrete GPUs
+        # or the dedicated portion of APUs.
+        try:
+            amd_cards = glob.glob("/sys/class/drm/card*/device/mem_info_vram_total")
+            for card_path in amd_cards:
+                try:
+                    with open(card_path, 'r') as f:
+                        # Value is in bytes
+                        bytes_val = int(f.read().strip())
+                        vram_mb += bytes_val // (1024 * 1024)
+                except (ValueError, IOError):
+                    continue
+        except Exception as e:
+            logger.warning(f"Error checking AMD VRAM: {e}")
+
+        # Unified Memory Architecture (UMA) Fallback
+        # If detected discrete VRAM is effectively unusable (< 1GB) for LLMs,
+        # but we detect an Intel (0x8086) or AMD (0x1002) GPU, 
+        # assume it's an Integrated/UMA system and use System RAM.
+        if vram_mb < 1024:
+            try:
+                # Check for Intel or AMD vendor IDs
+                # 0x8086 = Intel, 0x1002 = AMD
+                uma_vendors = ['0x8086', '0x1002']
+                found_uma = False
+                
+                for card_path in glob.glob("/sys/class/drm/card*/device/vendor"):
+                    try:
+                        with open(card_path, 'r') as f:
+                            vendor_id = f.read().strip()
+                            if vendor_id in uma_vendors:
+                                found_uma = True
+                                logger.info(f"Integrated/UMA GPU detected ({vendor_id}). Using shared system RAM.")
+                                break
+                    except (IOError, ValueError):
+                        continue
+                
+                if found_uma:
+                    # Use full system RAM as the memory pool for the LLM.
+                    # We take the max of what we found in discrete vs total RAM.
+                    vram_mb = max(vram_mb, ram_mb)
+                    
+            except Exception as e:
+                logger.warning(f"Error checking for UMA fallback: {e}")
+
+        return ram_mb, vram_mb
+    except Exception as e:
+        logger.warning(f"Failed to get system resources: {e}")
+        return None, None
+
 def verify_env_health():
     """Performs critical startup checks. Returns (True, []) or (False, [errors])."""
     errors = []
@@ -84,12 +163,19 @@ class RedirectedStdout:
 
     def write(self, string):
         if string:
-            clean = strip_ansi(string)
-            if clean:
-                # Normal prints go to GUI
-                self.queue.put(("text", clean, self.tag))
-                # Also mirror to terminal if debugging
-                if config.DEBUG:
+            # Handle Carriage Return for line replacement (progress bars)
+            if string.startswith('\r'):
+                clean = strip_ansi(string[1:])
+                if clean:
+                    self.queue.put(("replace_last", clean, self.tag))
+            else:
+                clean = strip_ansi(string)
+                if clean:
+                    # Normal prints go to GUI
+                    self.queue.put(("text", clean, self.tag))
+
+            # Also mirror to terminal if debugging
+            if config.DEBUG:
                     try:
                         self._original_stdout.write(string)
                         self._original_stdout.flush()
