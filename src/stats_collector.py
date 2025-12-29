@@ -8,6 +8,28 @@ client = ollama.Client()
 
 class StatsCollector:
     @staticmethod
+    def _estimate_tokens(text):
+        """
+        Improved heuristic for token estimation.
+        LLM tokenizers generally average ~4 chars per token for English text,
+        but code and special characters increase density.
+        """
+        if not text:
+            return 0
+        
+        # 1. Base: average of char-based and word-based heuristics
+        char_tokens = len(text) / 4.0
+        word_tokens = len(text.split()) * 1.3
+        
+        # 2. Density correction (code, symbols)
+        # Check for high density of symbols common in code/math
+        symbol_count = len([c for c in text if not c.isalnum() and not c.isspace()])
+        density_bonus = (symbol_count / len(text)) * 2.0 if len(text) > 0 else 0
+        
+        base_estimate = (char_tokens + word_tokens) / 2.0
+        return int(base_estimate * (1.0 + density_bonus))
+
+    @staticmethod
     def get_model_info(memory_store, system_prompt, messages):
         """Gathers statistics about the model and system."""
         stats = {
@@ -39,12 +61,11 @@ class StatsCollector:
                     max_ctx = val
                     break
             
-            total_chars = len(system_prompt)
+            total_tokens = StatsCollector._estimate_tokens(system_prompt)
             for msg in messages:
-                total_chars += len(msg['content'])
+                total_tokens += StatsCollector._estimate_tokens(msg['content'])
             
-            estimated_tokens = total_chars // 3 # Heuristic
-            stats["context_pct"] = min(100, (estimated_tokens / max_ctx) * 100)
+            stats["context_pct"] = min(100, (total_tokens / max_ctx) * 100)
             
         except Exception as e:
             logger.warning(f"Error gathering stats: {e}")

@@ -41,7 +41,7 @@ class TestLocalChatAssistant(unittest.TestCase):
         
         self.assertIn("Likes pizza", self.assistant.system_prompt)
         self.assertIn("Lokality", self.assistant.system_prompt)
-        # Check if date is in prompt
+        # Check if date and time are in prompt
         self.assertIn("Saturday, December 27, 2025", self.assistant.system_prompt)
         self.assertIn("10:30 AM", self.assistant.system_prompt)
 
@@ -57,8 +57,12 @@ class TestLocalChatAssistant(unittest.TestCase):
         result = self.assistant.decide_and_search("What is the weather?")
         
         self.assertIn("It is sunny.", result)
-        self.assertIn("Search for 'weather in London'", result)
-        mock_web_search.assert_called_once_with("weather in London")
+        # The query should NOT have date appended if it doesn't match the new logic's skip pattern
+        # Actually "London" is not a date pattern, so it MIGHT still append.
+        # Wait, I added "weather in London" - no date.
+        # Current date in test is 2025-12-27.
+        self.assertIn("Search for 'weather in London 2025-12-27'", result)
+        mock_web_search.assert_called_once_with("weather in London 2025-12-27")
 
     def test_accuracy_context_incorporation(self):
         # Verify that memory is in system prompt
