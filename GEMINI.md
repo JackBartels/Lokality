@@ -11,6 +11,7 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 - **Ollama**: Local LLM orchestration.
 - **Tkinter**: GUI framework for the desktop interface.
 - **SQLite3**: High-performance structured storage for long-term memory.
+- **psutil**: Cross-platform system monitoring for RAM/VRAM detection.
 - **Mistune 3.x**: Markdown parsing for rich text rendering.
 - **DuckDuckGo Search (ddgs)**: Real-time internet search context.
 
@@ -41,6 +42,7 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 - **Bypass Mode**: A raw shell integration using PTY (Pseudo-Terminal) allows users to bypass the assistant logic and speak directly to the Ollama CLI wrapper.
 
 ### 4. System Monitoring & Logging
+- **Hardware-Aware Initialization**: On startup, if no models are detected, `LocalChatAssistant` uses `psutil` and `sysfs` (on Linux) to detect available VRAM (supporting NVIDIA, AMD, and Intel). It selects the largest suitable Gemma 3 model from a predefined list in `config.py` and pulls it using the Ollama API, providing in-place progress updates in the GUI via carriage return (`\r`) handling.
 - **Live Stats**: Handled by `StatsCollector`. Real-time tracking of Ollama model resource usage, including RAM, VRAM, and estimated context window consumption.
 - **Visual Refinement**: Units (MB, %) are rendered in a smaller `unit` font for better visual hierarchy. Stats refresh automatically after every response.
 - **Persistent Logging**: A centralized `logger.py` module handles timestamped logs in the `logs/` directory. Features automatic log rotation/cleanup (keeps logs for 30 days) and simultaneous stream/file output.

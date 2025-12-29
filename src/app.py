@@ -435,6 +435,19 @@ class AssistantApp:
         self.msg_queue.put(("enable", None, None))
 
     # --- Rendering ---
+    def replace_last_message(self, text, tag):
+        """Replaces the last line of text with new content. Used for progress bars."""
+        self.chat_display.config(state='normal')
+        try:
+            # Delete content from start of last line to end
+            self.chat_display.delete("end-1c linestart", "end-1c")
+            self.chat_display.insert("end-1c", text, tag)
+            self.chat_display.see(tk.END)
+        except Exception as e:
+            pass
+        finally:
+            self.chat_display.config(state='disabled')
+
     def display_message(self, text, tag, final=False):
         self.chat_display.config(state='normal')
         try:
@@ -536,6 +549,8 @@ class AssistantApp:
         """Dispatcher for UI actions from the message queue."""
         if action == "text":
             self.display_message(content, tag)
+        elif action == "replace_last":
+            self.replace_last_message(content, tag)
         elif action == "clear":
             self.chat_display.config(state='normal')
             self.chat_display.delete("1.0", tk.END)

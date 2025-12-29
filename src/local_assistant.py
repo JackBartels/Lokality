@@ -9,14 +9,15 @@ from config import (
     MODEL_NAME, 
     VERSION, 
     SEARCH_DECISION_MAX_TOKENS, 
-    CONTEXT_WINDOW_SIZE
+    CONTEXT_WINDOW_SIZE,
+    DEFAULT_MODELS
 )
 from logger import logger
 from memory import MemoryStore
 from memory_manager import MemoryManager
 from search_engine import SearchEngine
 from stats_collector import StatsCollector
-from utils import debug_print, error_print, info_print
+from utils import debug_print, error_print, info_print, get_system_resources
 
 client = ollama.Client()
 
@@ -48,7 +49,87 @@ class LocalChatAssistant:
         self._cached_prompt = None
         self._last_memory_update = 0
         self._search_cache = {} # Basic TTL cache for searches
+        
+        self._ensure_model_available()
         self._update_system_prompt()
+
+    def _ensure_model_available(self):
+        """Checks if any models exist. If not, pulls a suitable default based on system resources."""
+        try:
+            models = client.list().get('models', [])
+            if models:
+                return
+
+            info_print("[*] No models found. Detecting system resources to select a default model...")
+            ram_mb, vram_mb = get_system_resources()
+            
+            # Fallback to 0 if detection fails, but we should try to be safe
+            ram_mb = ram_mb or 4096 
+            vram_mb = vram_mb or 0
+            
+            info_print(f"[*] Detected Resources - VRAM: {vram_mb}MB")
+            
+            selected_model = None
+            
+            # Select largest model that fits VRAM requirements
+            for m in DEFAULT_MODELS:
+                if vram_mb >= m["min_vram_mb"]:
+                    selected_model = m["name"]
+            
+            if not selected_model:
+                error_print("[!] Your hardware does not meet the minimum requirements for the default models.")
+                info_print("[!] Lokality requires at least 640MB of Discrete VRAM to run effectively.")
+                info_print("[!] No model was pulled.")
+                return
+
+            info_print(f"[*] Selected default model: {selected_model}")
+            info_print(f"[*] Pulling {selected_model}... This may take a while depending on your internet connection.")
+            
+            current_digest = ""
+            last_percent = -1
+            
+            for progress in client.pull(selected_model, stream=True):
+                status = progress.get('status')
+                if status == 'downloading':
+                     digest = progress.get('digest', '')
+                     total = progress.get('total', 1)
+                     completed = progress.get('completed', 0)
+                     
+                     if digest != current_digest:
+                         if current_digest: print() # Newline for previous bar
+                         current_digest = digest
+                         info_print(f"Layer {digest[:12]}...")
+                         last_percent = -1
+                     
+                     if total > 0:
+                         percent = int((completed / total) * 100)
+                         # Update every 10%
+                         if percent % 10 == 0 and percent != last_percent:
+                             bar_length = 20
+                             filled = int(bar_length * percent / 100)
+                             bar = '█' * filled + '░' * (bar_length - filled)
+                             # Use print with \r and end='' to avoid trailing newline
+                             progress_str = f"\r[{bar}] {percent}%"
+                             print(progress_str, end="", flush=True)
+                             last_percent = percent
+
+                elif status == 'success':
+                     print() # Finish the bar line
+                     info_print("Download complete.")
+            
+            info_print(f"[*] Model {selected_model} ready.")
+            
+            # Update the global MODEL_NAME if possible, though it's a constant. 
+            # In a real app, we might want to reload config or set instance var.
+            # For now, we assume the user configured the env var or we just pulled one.
+            # If LOKALITY_MODEL env var was set to something that didn't exist, we just pulled a default.
+            # Use the selected model for this session if the configured one is missing.
+            global MODEL_NAME
+            MODEL_NAME = selected_model
+            
+        except Exception as e:
+            error_print(f"Model initialization failed: {e}")
+            info_print("[!] Please check your internet connection or Ollama status.")
 
     def _update_system_prompt(self, query=None):
         # Cache check: if no query and we have a cached prompt, reuse it
