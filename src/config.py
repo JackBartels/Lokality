@@ -1,6 +1,6 @@
 import os
 
-VERSION = "v0.1.0"
+VERSION = "v0.1.1"
 MODEL_NAME = os.environ.get("LOKALITY_MODEL", "gemma3:4b-it-qat")
 
 # Default models ordered by size/resource requirement

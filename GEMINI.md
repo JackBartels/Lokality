@@ -47,10 +47,16 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 - **Visual Refinement**: Units (MB, %) are rendered in a smaller `unit` font for better visual hierarchy. Stats refresh automatically after every response.
 - **Persistent Logging**: A centralized `logger.py` module handles timestamped logs in the `logs/` directory. Features automatic log rotation/cleanup (keeps logs for 30 days) and simultaneous stream/file output.
 
+### 5. Dynamic Complexity Scoring
+- **Intent Analysis**: Uses keyword matching and linguistic analysis (ARI) to predict the required thinking effort for a prompt.
+- **Hardware-Safe Scaling**: Dynamically adjusts `num_ctx` based on available VRAM headroom to prevent OOM errors while maximizing context for complex tasks.
+- **Creativity Mapping**: Predicts creative intent to adjust sampling parameters (`temperature`, `top_p`, `top_k`) for more varied or deterministic responses.
+
 ## Project Structure
 
 - `src/`: Refactored into specialized modules.
   - `app.py`: Main entry point and GUI orchestration. Consolidated process management and dispatcher-based queue polling.
+  - `complexity_scorer.py`: Analyzes user input to dynamically adjust model parameters (context window, temperature, penalties) based on predicted complexity and creativity.
   - `config.py`: Global constants.
   - `theme.py`: UI styling, colors, and font definitions.
   - `markdown_engine.py`: Dispatcher-based logic for rendering Markdown tokens into Tkinter widgets. Supports complex nesting and modern Mistune plugins.
