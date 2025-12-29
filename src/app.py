@@ -15,7 +15,6 @@ import local_assistant
 from config import (
     MODEL_NAME, 
     VERSION, 
-    RESPONSE_MAX_TOKENS, 
     CONTEXT_WINDOW_SIZE
 )
 from logger import logger
@@ -349,7 +348,6 @@ class AssistantApp:
                         messages=msgs, 
                         stream=True,
                         options={
-                            "num_predict": RESPONSE_MAX_TOKENS,
                             "num_ctx": CONTEXT_WINDOW_SIZE
                         }
                     )
