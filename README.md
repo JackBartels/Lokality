@@ -1,4 +1,4 @@
-# Lokality (v0.1.0)
+# Lokality (v0.1.1)
 
 ## Description
 Lokality is a local-first, privacy-focused desktop AI assistant wrapper. Powered by Ollama and built with Python, it provides a modern chat interface with real-time internet access, long-term memory capabilities, and many other useful features.
@@ -53,6 +53,7 @@ python3 -m unittest discover tests
 - **Intelligent Long-Term Memory**: Automatically extracts and stores facts about the user in a local SQLite database for future reference.
 - **Robust Fact Extraction**: Uses LLM-driven delta management to ADD, REMOVE, or UPDATE memories. It features a strict "Golden Rule" to ensure only permanent facts are stored, while transient actions, present-tense wants, and inferred preferences are strictly ignored.
 - **Real-Time Web Search**: Dynamically decides when to search the internet using DuckDuckGo to provide up-to-date information.
+- **Dynamic Complexity Scoring**: Analyzes user prompts to predict required thinking effort and creativity, dynamically adjusting model parameters (context window, temperature, penalties) and ensuring VRAM safety.
 - **Model & System Info**: Use `/info` to toggle a live info bar showing Model, Remaining Context, Long-term Memory size, and RAM/VRAM usage.
 - **Advanced Markdown Support**: 
     - Full support for **Headings**, **Bold**, **Italics**, **Strikethrough**, **Subscript**, and **Superscript**.
