@@ -40,7 +40,15 @@ class TestSearchEngine(unittest.TestCase):
         mock_instance.text.side_effect = Exception("Network error")
         
         results = SearchEngine.web_search("test query")
-        self.assertIn("Error during search: Network error", results)
+        self.assertIn("Search failed for query 'test query': Network error", results)
+
+    @patch('search_engine.DDGS')
+    def test_web_search_connectivity_error(self, mock_ddgs):
+        mock_instance = mock_ddgs.return_value.__enter__.return_value
+        mock_instance.text.side_effect = Exception("Connection timeout")
+        
+        results = SearchEngine.web_search("test query")
+        self.assertIn("CRITICAL: Web search failed due to a connectivity issue", results)
 
 if __name__ == "__main__":
     unittest.main()

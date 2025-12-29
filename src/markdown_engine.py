@@ -23,8 +23,6 @@ class MarkdownEngine:
 
     def _get_url_at_index(self, index):
         """Finds the URL associated with the link at the given text index."""
-        # Tkinter doesn't easily store metadata per-range, so we use a range map
-        # However, for a chat app, we can just look at tags at that position
         tags = self.text_widget.tag_names(index)
         for t in tags:
             if t.startswith("link_data_"):
@@ -59,57 +57,101 @@ class MarkdownEngine:
         widget.bind("<Button-4>", _on_linux_scroll_up)
         widget.bind("<Button-5>", _on_linux_scroll_down)
         
-        # Also bind for all children if any (e.g. Labels in a Table Frame)
         for child in widget.winfo_children():
             self._bind_scroll(child)
 
     def render_tokens(self, tokens, base_tag, extra_tags=None, level=0):
-        # Accumulate tags for nested styling
+        """Main entry point for rendering a list of tokens."""
         style_tags = []
         if extra_tags:
             if isinstance(extra_tags, (list, tuple)): style_tags.extend(extra_tags)
             else: style_tags.append(extra_tags)
         
         for token in tokens:
-            t_type = token['type']
-            
-            # Helper to manage nested styles (Bold + Italic)
-            def get_nested_tags(new_style):
-                new_list = style_tags + [new_style]
-                if "md_bold" in new_list and "md_italic" in new_list:
-                    # Replace both with the combined tag
-                    res = [t for t in new_list if t not in ("md_bold", "md_italic")]
-                    res.append("md_bold_italic")
-                    return res
-                return new_list
+            self._dispatch_token(token, base_tag, style_tags, level)
 
-            handlers = {
-                'paragraph': lambda t: (self.render_tokens(t['children'], base_tag, style_tags, level), 
-                                        self.text_widget.insert(tk.END, "\n") if level > 0 else self.text_widget.insert(tk.END, "\n\n")),
-                'block_text': lambda t: self.render_tokens(t['children'], base_tag, style_tags, level),
-                'text': lambda t: self.text_widget.insert(tk.END, t.get('raw', t.get('text', '')), tuple(style_tags + [base_tag])),
-                'strong': lambda t: self.render_tokens(t['children'], base_tag, get_nested_tags("md_bold"), level),
-                'emphasis': lambda t: self.render_tokens(t['children'], base_tag, get_nested_tags("md_italic"), level),
-                'subscript': lambda t: self.render_tokens(t['children'], base_tag, style_tags + ["md_sub"], level),
-                'superscript': lambda t: self.render_tokens(t['children'], base_tag, style_tags + ["md_sup"], level),
-                'strikethrough': lambda t: self.render_tokens(t['children'], base_tag, style_tags + ["md_strikethrough"], level),
-                'codespan': lambda t: self.text_widget.insert(tk.END, t.get('raw', ''), ("md_code", base_tag)),
-                'block_code': lambda t: (self.text_widget.insert(tk.END, t.get('raw', ''), ("md_code", base_tag)), self.text_widget.insert(tk.END, "\n", base_tag)),
-                'heading': lambda t: (self.text_widget.insert(tk.END, "\n") if self.text_widget.index("end-1c") != "1.0" else None, 
-                                      self.render_tokens(t['children'], base_tag, f"md_h{min(3, t['attrs']['level'])}", level), 
-                                      self.text_widget.insert(tk.END, "\n")),
-                'table': lambda t: (self.render_table(t, base_tag), self.text_widget.insert(tk.END, "\n")),
-                'list': lambda t: self._render_list(t, base_tag, level),
-                'block_quote': lambda t: self._render_blockquote(t, base_tag, style_tags, level),
-                'thematic_break': lambda t: self._render_hr(base_tag),
-                'softbreak': lambda t: self.text_widget.insert(tk.END, "\n"),
-                'link': self._render_link
-            }
-            
-            if t_type in handlers:
-                handlers[t_type](token)
+    def _dispatch_token(self, token, base_tag, style_tags, level):
+        """Dispatcher for different token types."""
+        t_type = token['type']
+        
+        handlers = {
+            'paragraph': self._handle_paragraph,
+            'block_text': self._handle_block_text,
+            'text': self._handle_text,
+            'strong': self._handle_strong,
+            'emphasis': self._handle_emphasis,
+            'subscript': self._handle_subscript,
+            'superscript': self._handle_superscript,
+            'strikethrough': self._handle_strikethrough,
+            'codespan': self._handle_codespan,
+            'block_code': self._handle_block_code,
+            'heading': self._handle_heading,
+            'table': self._handle_table,
+            'list': self._handle_list,
+            'block_quote': self._handle_block_quote,
+            'thematic_break': self._handle_thematic_break,
+            'softbreak': self._handle_softbreak,
+            'link': self._handle_link
+        }
+        
+        if t_type in handlers:
+            handlers[t_type](token, base_tag, style_tags, level)
 
-    def _render_hr(self, base_tag):
+    def _get_nested_tags(self, current_tags, new_style):
+        """Helper to manage nested styles and combined tags (e.g. Bold + Italic)."""
+        new_list = current_tags + [new_style]
+        if "md_bold" in new_list and "md_italic" in new_list:
+            res = [t for t in new_list if t not in ("md_bold", "md_italic")]
+            res.append("md_bold_italic")
+            return res
+        return new_list
+
+    # --- Token Handlers ---
+
+    def _handle_paragraph(self, token, base_tag, style_tags, level):
+        self.render_tokens(token['children'], base_tag, style_tags, level)
+        self.text_widget.insert(tk.END, "\n" if level > 0 else "\n\n")
+
+    def _handle_block_text(self, token, base_tag, style_tags, level):
+        self.render_tokens(token['children'], base_tag, style_tags, level)
+
+    def _handle_text(self, token, base_tag, style_tags, level):
+        content = token.get('raw', token.get('text', ''))
+        self.text_widget.insert(tk.END, content, tuple(style_tags + [base_tag]))
+
+    def _handle_strong(self, token, base_tag, style_tags, level):
+        self.render_tokens(token['children'], base_tag, self._get_nested_tags(style_tags, "md_bold"), level)
+
+    def _handle_emphasis(self, token, base_tag, style_tags, level):
+        self.render_tokens(token['children'], base_tag, self._get_nested_tags(style_tags, "md_italic"), level)
+
+    def _handle_subscript(self, token, base_tag, style_tags, level):
+        self.render_tokens(token['children'], base_tag, style_tags + ["md_sub"], level)
+
+    def _handle_superscript(self, token, base_tag, style_tags, level):
+        self.render_tokens(token['children'], base_tag, style_tags + ["md_sup"], level)
+
+    def _handle_strikethrough(self, token, base_tag, style_tags, level):
+        self.render_tokens(token['children'], base_tag, style_tags + ["md_strikethrough"], level)
+
+    def _handle_codespan(self, token, base_tag, style_tags, level):
+        self.text_widget.insert(tk.END, token.get('raw', ''), ("md_code", base_tag))
+
+    def _handle_block_code(self, token, base_tag, style_tags, level):
+        self.text_widget.insert(tk.END, token.get('raw', ''), ("md_code", base_tag))
+        self.text_widget.insert(tk.END, "\n", base_tag)
+
+    def _handle_heading(self, token, base_tag, style_tags, level):
+        if self.text_widget.index("end-1c") != "1.0":
+            self.text_widget.insert(tk.END, "\n")
+        h_level = min(3, token['attrs']['level'])
+        self.render_tokens(token['children'], base_tag, f"md_h{h_level}", level)
+        self.text_widget.insert(tk.END, "\n")
+
+    def _handle_softbreak(self, token, base_tag, style_tags, level):
+        self.text_widget.insert(tk.END, "\n")
+
+    def _handle_thematic_break(self, token, base_tag, style_tags, level):
         """Renders a thick horizontal rule."""
         w = max(400, self.text_widget.winfo_width() - 60)
         canv = tk.Canvas(self.text_widget, bg=Theme.BG_COLOR, height=6, highlightthickness=0, width=w)
@@ -119,50 +161,39 @@ class MarkdownEngine:
         self.text_widget.window_create(tk.END, window=canv)
         self.text_widget.insert(tk.END, "\n\n")
 
-    def _render_blockquote(self, token, base_tag, style_tags, level):
+    def _handle_block_quote(self, token, base_tag, style_tags, level):
         """Renders a blockquote with a vertical sidebar indicator."""
         if self.text_widget.index("end-1c") != "1.0":
             self.text_widget.insert(tk.END, "\n")
-        
-        # Apply md_quote to the whole block by passing it to children
-        # We also prepend the bar character
         self.text_widget.insert(tk.END, "┃ ", ("md_quote_bar", base_tag))
         self.render_tokens(token['children'], base_tag, style_tags + ["md_quote"], level + 1)
-        
         if self.text_widget.get("end-2c", "end-1c") != "\n":
             self.text_widget.insert(tk.END, "\n")
 
-    def _render_list(self, token, base_tag, level=0):
+    def _handle_list(self, token, base_tag, style_tags, level):
         attrs = token.get('attrs', {})
         ordered = attrs.get('ordered', False)
         start = attrs.get('start', 1)
         indent = "    " * level
         for i, item in enumerate(token['children']):
-            # Ensure we are on a new line for each item
             if self.text_widget.get("end-2c", "end-1c") != "\n" and self.text_widget.index("end-1c") != "1.0":
                 self.text_widget.insert(tk.END, "\n")
-                
             prefix = f"{indent}{start + i}. " if ordered else f"{indent}• "
             self.text_widget.insert(tk.END, prefix, base_tag)
-            
-            # List items in Mistune usually contain blocks (like paragraph)
             self.render_tokens(item['children'], base_tag, level=level + 1)
-            
         if level == 0:
             self.text_widget.insert(tk.END, "\n")
 
-    def _render_link(self, token):
+    def _handle_link(self, token, base_tag, style_tags, level):
         link_text = self.get_token_text(token['children'])
         url = token['attrs']['url']
         link_id = f"link_data_{hash(url)}"
         self.url_map[link_id] = url
-        # Use tags to identify links and their specific data ID
         self.text_widget.insert(tk.END, link_text, ("md_link", link_id))
 
-    def render_table(self, token, base_tag):
+    def _handle_table(self, token, base_tag, style_tags, level):
         try:
             header_cells, rows = [], []
-            # 1. Try Mistune 3.x structure (thead/tbody)
             sections = token.get('children', [])
             if any(s['type'] in ['thead', 'tbody'] for s in sections):
                 for section in sections:
@@ -173,7 +204,6 @@ class MarkdownEngine:
                         for tr in section['children']:
                             rows.append([self.get_token_text(td['children']) for td in tr['children']])
             else:
-                # 2. Try older/simpler structure
                 if len(sections) >= 1:
                     header_cells = [self.get_token_text(c['children']) for c in sections[0]['children']]
                     if len(sections) > 1:
@@ -201,6 +231,7 @@ class MarkdownEngine:
             self.text_widget.insert(tk.END, "\n")
             
         except Exception as e:
+            from utils import debug_print
             debug_print(f"Markdown: Error rendering table: {e}")
 
     def get_token_text(self, children):

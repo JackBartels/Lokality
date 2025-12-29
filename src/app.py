@@ -1,6 +1,7 @@
 import logging
 import os
 import queue
+import re
 import signal
 import sys
 import threading
@@ -12,6 +13,7 @@ import mistune
 
 import config
 import local_assistant
+from complexity_scorer import ComplexityScorer
 from config import (
     MODEL_NAME, 
     VERSION, 
@@ -335,21 +337,40 @@ class AssistantApp:
             
             def run_assistant():
                 try:
-                    search_context = self.assistant.decide_and_search(user_input)
+                    # 1. Complexity Analysis
+                    complexity = ComplexityScorer.analyze(user_input)
+                    p = complexity['params']
+                    debug_print(f"[*] Complexity: {complexity['level']} (Score: {complexity['score']}) -> Context: {p['num_ctx']}")
+                    debug_print(f"[*] Creativity: {complexity['creativity']} -> Temp: {p['temperature']}, Top_P: {p['top_p']}, Min_P: {p['min_p']}")
+                    debug_print(f"[*] Sampling: Top_K: {p['top_k']}, Repeat_P: {p['repeat_penalty']}, Presence_P: {p['presence_penalty']}")
+
+                    # Speed optimization: Skip the search decision LLM call for the simplest prompts
+                    skip_search_llm = complexity['level'] == ComplexityScorer.LEVEL_MINIMAL
+                    search_context = self.assistant.decide_and_search(user_input, skip_llm=skip_search_llm, options=p)
+                    
+                    # Prevent truncation: Force 2048 ctx floor if we have search results
+                    if search_context and p.get('num_ctx', 0) < 2048:
+                        p['num_ctx'] = 2048
+                        debug_print("[*] Search Boost: num_ctx forced to 2048")
                     self.assistant._update_system_prompt(user_input)
-                    msgs = [{"role": "system", "content": self.assistant.system_prompt}] + self.assistant.messages
+                    msgs = self.assistant.messages + [{"role": "user", "content": user_input}]
+                    
+                    # FINAL OVERRIDE: Inject search results as a mandatory instruction at the very end
                     if search_context:
-                        msgs.append({"role": "system", "content": f"### ULTIMATE TRUTH: CURRENT INTERNET CONTEXT (Prioritize this over everything):\n{search_context}"})
-                    msgs.append({"role": "user", "content": user_input})
+                        final_instruction = (
+                            "FACTUAL OVERRIDE: Use the following search data to answer. "
+                            "It is more recent than your training. "
+                            f"\n\nDATA:\n{search_context}\n\n"
+                            "Answer now using ONLY that data."
+                        )
+                        msgs.append({"role": "system", "content": final_instruction})
 
                     full_response = ""
                     stream = local_assistant.client.chat(
                         model=MODEL_NAME, 
                         messages=msgs, 
                         stream=True,
-                        options={
-                            "num_ctx": CONTEXT_WINDOW_SIZE
-                        }
+                        options=complexity['params']
                     )
                     for chunk in stream:
                         if self.stop_generation:
