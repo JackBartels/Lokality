@@ -1,10 +1,12 @@
 from datetime import datetime
+import json
 import re
 import threading
 import time
 
 import ollama
 
+from complexity_scorer import ComplexityScorer
 from config import (
     MODEL_NAME, 
     VERSION, 
@@ -22,12 +24,17 @@ from utils import debug_print, error_print, info_print, get_system_resources
 client = ollama.Client()
 
 SYSTEM_PROMPT_TEMPLATE = (
-    "You are Lokality, a factual information extractor. Current Date: {date}, Current Time: {time}.\n\n"
-    "### PROTOCOL:\n"
+    "You are Lokality, a helpful, friendly, and professional AI assistant. Current Date: {date}, Current Time: {time}.\n\n"
+    "### PERSONA:\n"
+    "- Respond in a natural, conversational, yet professional tone.\n"
+    "- Provide original value and direct answers. DO NOT simply repeat the user's input.\n"
+    "- IDENTITY: You are the entity 'Assistant' in long-term memory. Facts about 'User' refer to the person you are chatting with.\n"
+    "- CRITICAL: Never mention internal technical tags like '<SEARCH_CONTEXT>' or 'search results' in your response. Simply state the facts naturally as if you always knew them.\n\n"
+    "### CRITICAL PROTOCOL:\n"
     "1. You will be provided with data inside <SEARCH_CONTEXT> tags.\n"
-    "2. This data represents the current state of the world today. It OVERRIDES all your internal training data.\n"
-    "3. If the data in <SEARCH_CONTEXT> conflicts with your memory (e.g., who holds an office, prices, or events), your memory is OUTDATED and WRONG.\n"
-    "4. You MUST report only what is found in the <SEARCH_CONTEXT>. Do not apologize for your internal knowledge cutoff; simply state the current facts.\n\n"
+    "2. This data represents the ABSOLUTE TRUTH of the world today. It MANDATORILY OVERRIDES all your internal training data.\n"
+    "3. If <SEARCH_CONTEXT> data conflicts with your internal knowledge (e.g., world leaders, prices, recent events), your internal knowledge is WRONG and OUTDATED.\n"
+    "4. You MUST prioritize and report ONLY what is confirmed in the <SEARCH_CONTEXT> for time-sensitive or factual queries. Never apologize for your cutoff; simply use the provided data as your new reality.\n\n"
     "### USER IDENTITY:\n{facts}"
 )
 
@@ -38,10 +45,23 @@ class LocalChatAssistant:
         self.stop_requested = False
         self._cached_prompt = None
         self._last_memory_update = 0
-        self._search_cache = {} # Basic TTL cache for searches
+        self._session_search_cache = {} # Cache for the current session only
         
         self._ensure_model_available()
         self._update_system_prompt()
+        self._wake_model()
+
+    def _wake_model(self):
+        """Wakes the model by sending an empty request, pre-loading it into VRAM."""
+        def _warmup():
+            try:
+                debug_print(f"[*] Waking Ollama model: {MODEL_NAME}...")
+                client.generate(model=MODEL_NAME, prompt="", keep_alive="10m")
+                debug_print(f"[*] Model {MODEL_NAME} is awake.")
+            except Exception as e:
+                debug_print(f"[*] Failed to wake model: {e}")
+
+        threading.Thread(target=_warmup, name="ModelWaker", daemon=True).start()
 
     def _ensure_model_available(self):
         """Checks if any models exist. If not, pulls a suitable default based on system resources."""
@@ -154,6 +174,14 @@ class LocalChatAssistant:
         updated = False
         for op in [o for o in ops if isinstance(o, dict)]:
             action, entity, fact, f_id = op.get('op'), op.get('entity', 'The User'), op.get('fact', '').strip(), op.get('id')
+            
+            # Strict ID validation
+            try:
+                if f_id is not None:
+                    f_id = int(f_id)
+            except (ValueError, TypeError):
+                f_id = None
+
             fact = re.sub(r'\s*\(ID:\s*\d+\)$', '', fact).strip()
             exists = any(f['id'] == f_id for f in all_facts) if f_id is not None else False
 
@@ -180,68 +208,143 @@ class LocalChatAssistant:
         if skip_llm and clean_in in filler and len(user_input) < 10: 
             return None
 
-        # Search cache check (TTL: 1 hour)
-        import hashlib
-        cache_key = hashlib.md5(user_input[:500].encode()).hexdigest()
-        if cache_key in self._search_cache:
-            res, expiry = self._search_cache[cache_key]
-            if time.time() < expiry:
-                debug_print(f"[*] Search Cache Hit")
-                return res
-
         now = datetime.now()
         # Optimization: Only use last 2 turns for search decision to save tokens/time
         recent_context = "\n".join([f"{m['role']}: {m['content'][:150]}..." for m in self.messages[-2:]])
         
         decision_prompt = (
-            f"Date: {now.strftime('%Y-%m-%d')}, Time: {now.strftime('%H:%M:%S')}\n"
+            f"Current Date: {now.strftime('%Y-%m-%d')}, Time: {now.strftime('%H:%M:%S')}\n"
             f"Relevant Memory: {self.memory.get_relevant_facts(user_input)}\n"
             f"History: {recent_context}\n"
             f"User: {user_input}\n\n"
-            "Task: Decide if a web search is NECESSARY. Rules:\n"
-            "1. SEARCH for all dynamic, current, or time-sensitive facts (news, leaders, prices, weather). Your internal knowledge is OUTDATED for these.\n"
-            "2. SEARCH for obscure facts where internal data might be missing.\n"
-            "3. CONSULT MEMORY: If the answer is in 'Relevant Memory', return 'DONE'.\n"
-            "4. INTERNAL KNOWLEDGE: Use ONLY for non-time-sensitive common facts, reasoning, logic, and simple math.\n"
-            "Output: 'SEARCH: <query>' or 'DONE'."
+            "Task: Decide if a web search is NECESSARY to provide a fresh and accurate answer. Rules:\n"
+            "1. SEARCH for any request for 'updates', 'recent developments', 'what is new', or the current state of the world/topics.\n"
+            "2. SEARCH for dynamic info (e.g., current leaders, prices, breaking news, software versions) that changes over time.\n"
+            "3. NEVER SEARCH for the current time or date. These are provided to you in the prompt above.\n"
+            "4. YOUR INTERNAL KNOWLEDGE IS OUTDATED for dynamic facts. If a fact can change, DO NOT trust your training.\n"
+            "5. USE INTERNAL KNOWLEDGE ONLY for static facts (math, logic, grammar, distant history) or casual conversation.\n\n"
+            "Return JSON: {\"action\": \"search\", \"query\": \"...\"} OR {\"action\": \"done\"}"
         )
         
         try:
-            # Optimization: Use passed options (especially num_ctx) to avoid Ollama re-allocation
             gen_options = {
                 "num_predict": SEARCH_DECISION_MAX_TOKENS,
-                "temperature": 0.0,
-                "stop": ["\n", "DONE", "User:", "Input:"]
+                "temperature": 0.0
             }
             if options:
-                # Prioritize num_ctx from current complexity to keep memory stable
                 gen_options["num_ctx"] = options.get("num_ctx", CONTEXT_WINDOW_SIZE)
+            else:
+                # VRAM Safety fallback
+                gen_options["num_ctx"] = ComplexityScorer.get_safe_context_size(CONTEXT_WINDOW_SIZE)
 
             res = client.generate(
                 model=MODEL_NAME, 
                 prompt=decision_prompt, 
+                format="json",
                 options=gen_options
             )
-            response = res['response'].strip()
-            debug_print(f"[*] Search Decision: {response}")
+            response_text = res['response'].strip()
+            debug_print(f"[*] Search Decision Raw: {response_text}")
             
-            match = re.search(r'SEARCH:\s*(.*)', response, re.IGNORECASE)
-            if match:
-                query = match.group(1).strip().strip('"').strip('*').strip('_')
-                if query:
-                    # Optimization: Append current date if NOT already present to ensure recency
-                    # Check for YYYY or common month names
-                    date_pattern = r'\b(20\d{2}|january|february|march|april|may|june|july|august|september|october|november|december)\b'
-                    if not re.search(date_pattern, query, re.IGNORECASE):
-                        query = f"{query} {now.strftime('%Y-%m-%d')}"
+            try:
+                data = json.loads(response_text)
+            except json.JSONDecodeError:
+                # Fallback to simple regex if model fails format=json (rare but possible)
+                if "search" in response_text.lower():
+                    data = {"action": "search", "query": user_input}
+                else:
+                    data = {"action": "done"}
+
+            if data and data.get("action") == "search":
+                query = data.get("query", "").strip()
+                if not query:
+                    query = user_input # Fallback to original input
+                
+                # Keywords indicating high-probability time-sensitivity (definitive only)
+                time_sensitive_pattern = r'\b(price|weather|news|stock|score|winner|election|tonight)\b'
+                if re.search(time_sensitive_pattern, query, re.IGNORECASE):
+                    date_str = now.strftime('%Y-%m-%d')
+                    if date_str not in query:
+                        query = f"{query} {date_str}"
+                
+                # --- Session Cache Check ---
+                if query in self._session_search_cache:
+                    debug_print(f"[*] Search Cache Hit: {query}")
+                    return self._session_search_cache[query]
+                # ---------------------------
                         
-                    results = SearchEngine.web_search(query)
-                    full_res = f"--- Search for '{query}' ---\n{results}"
-                    self._search_cache[cache_key] = (full_res, time.time() + 3600)
-                    return full_res
+                results = SearchEngine.web_search(query)
+                
+                # --- Deep Search Logic: Stage 2 (Scraping) ---
+                # Ask the model if any of the results look promising enough to scrape
+                scrape_decision_prompt = (
+                    f"CONTEXT: {recent_context}\n"
+                    f"USER REQUEST: {user_input}\n\n"
+                    f"AVAILABLE SNIPPETS:\n{results}\n\n"
+                    "TASK: Can you answer the user with 100% accuracy using ONLY the snippets above?\n"
+                    "Scraping is VERY COSTLY. Only pick a URL to scrape if the answer is MISSING or TRUNCATED in the snippets and the URL is highly likely to have it.\n\n"
+                    "Return JSON: {\"action\": \"scrape\", \"url\": \"...\"} OR {\"action\": \"done\"}"
+                )
+                
+                try:
+                    # VRAM Safety for scrape decision
+                    scrape_ctx = ComplexityScorer.get_safe_context_size(4096)
+                    debug_print(f"[*] Scrape Decision: Prompting model...")
+                    
+                    scrape_res = client.generate(
+                        model=MODEL_NAME,
+                        prompt=scrape_decision_prompt,
+                        format="json",
+                        options={
+                            "num_predict": SEARCH_DECISION_MAX_TOKENS,
+                            "temperature": 0.0,
+                            "num_ctx": scrape_ctx 
+                        }
+                    )
+                    scrape_data = json.loads(scrape_res['response'].strip())
+                    
+                    if scrape_data.get("action") == "scrape":
+                        target_url = scrape_data.get("url")
+                        if target_url and target_url.startswith("http"):
+                            scraped_raw = SearchEngine.scrape_url(target_url)
+                            
+                            # --- Stage 3: Information Distillation ---
+                            # Extract only the relevant bits to keep context clean and focused
+                            distill_prompt = (
+                                f"WHY WE SEARCHED: {user_input}\n\n"
+                                f"RAW PAGE CONTENT FROM {target_url}:\n{scraped_raw}\n\n"
+                                "TASK: Extract ONLY the specific facts or data points that help answer 'WHY WE SEARCHED'. "
+                                "Discard all navigation, ads, site-wide headers, or unrelated sidebar content. "
+                                "Provide a high-density, factual summary of the relevant information only."
+                            )
+                            
+                            try:
+                                distill_ctx = ComplexityScorer.get_safe_context_size(4096)
+                                distill_res = client.generate(
+                                    model=MODEL_NAME,
+                                    prompt=distill_prompt,
+                                    options={
+                                        "num_predict": 500, # Allow more room for the actual data
+                                        "temperature": 0.0,
+                                        "num_ctx": distill_ctx
+                                    }
+                                )
+                                distilled_info = distill_res['response'].strip()
+                                results = f"{results}\n\n--- RELEVANT DATA FROM {target_url} ---\n{distilled_info}"
+                            except Exception as distill_err:
+                                debug_print(f"[*] Distillation failed: {distill_err}")
+                                # Fallback to a truncated version of raw if distillation fails
+                                results = f"{results}\n\n--- RAW CONTENT FROM {target_url} (TRUNCATED) ---\n{scraped_raw[:2000]}"
+                except Exception as scrape_err:
+                    debug_print(f"[*] Scrape Decision failed: {scrape_err}")
+                # ----------------------------------------------
+
+                full_res = f"--- Search for '{query}' ---\n{results}"
+                self._session_search_cache[query] = full_res # Save to session cache
+                return full_res
         except Exception as e:
             logger.error(f"Search Decision Error: {e}")
-            return f"SYSTEM ERROR: The search decision engine or the search itself failed. Error: {e}. You MUST admit that you cannot search the internet right now if the user's question requires real-time data."
+            return f"SYSTEM ERROR: The search decision engine failed. Error: {e}. You MUST admit that you cannot search the internet right now if the user's question requires real-time data."
         return None
 
     def clear_long_term_memory(self):

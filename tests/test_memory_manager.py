@@ -14,7 +14,7 @@ class TestMemoryManager(unittest.TestCase):
         # Mock LLM response for fact extraction
         mock_client.chat.return_value = {
             'message': {
-                'content': '[{"op": "add", "entity": "User", "fact": "Lives in Paris"}]'
+                'content': '{"operations": [{"op": "add", "entity": "User", "fact": "Lives in Paris"}]}'
             }
         }
         
@@ -28,7 +28,7 @@ class TestMemoryManager(unittest.TestCase):
     def test_extract_facts_no_change(self, mock_client):
         mock_client.chat.return_value = {
             'message': {
-                'content': '[]'
+                'content': '{"operations": []}'
             }
         }
         
@@ -40,7 +40,7 @@ class TestMemoryManager(unittest.TestCase):
         # Mock LLM response for multiple operations
         mock_client.chat.return_value = {
             'message': {
-                'content': '[{"op": "add", "entity": "User", "fact": "Likes tea"}, {"op": "add", "entity": "User", "fact": "Has a cat"}]'
+                'content': '{"operations": [{"op": "add", "entity": "User", "fact": "Likes tea"}, {"op": "add", "entity": "User", "fact": "Has a cat"}]}'
             }
         }
         
