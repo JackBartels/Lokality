@@ -348,20 +348,30 @@ class AssistantApp:
                     skip_search_llm = complexity['level'] == ComplexityScorer.LEVEL_MINIMAL
                     search_context = self.assistant.decide_and_search(user_input, skip_llm=skip_search_llm, options=p)
                     
-                    # Prevent truncation: Force 2048 ctx floor if we have search results
+                    # Prevent truncation: Apply VRAM-safe context floor if we have search results
                     if search_context and p.get('num_ctx', 0) < 2048:
-                        p['num_ctx'] = 2048
-                        debug_print("[*] Search Boost: num_ctx forced to 2048")
+                        p['num_ctx'] = ComplexityScorer.get_safe_context_size(2048)
+                        debug_print(f"[*] Search Boost: num_ctx floor applied ({p['num_ctx']})")
+                    
                     self.assistant._update_system_prompt(user_input)
-                    msgs = self.assistant.messages + [{"role": "user", "content": user_input}]
+                    
+                    # Core Messages: System Prompt + History + Current Input
+                    msgs = [
+                        {"role": "system", "content": self.assistant.system_prompt}
+                    ] + self.assistant.messages + [{"role": "user", "content": user_input}]
                     
                     # FINAL OVERRIDE: Inject search results as a mandatory instruction at the very end
                     if search_context:
                         final_instruction = (
-                            "FACTUAL OVERRIDE: Use the following search data to answer. "
-                            "It is more recent than your training. "
-                            f"\n\nDATA:\n{search_context}\n\n"
-                            "Answer now using ONLY that data."
+                            "CRITICAL FACTUAL OVERRIDE: You MUST use the following search data to answer. "
+                            "This data is THE current reality and overrides ALL your internal training.\n\n"
+                            f"<SEARCH_CONTEXT>\n{search_context}\n</SEARCH_CONTEXT>\n\n"
+                            f"ORIGINAL INTENT: The search was performed specifically to find: '{user_input}'\n\n"
+                            "STRICT DIRECTIVES:\n"
+                            "1. Answer using ONLY relevant facts from <SEARCH_CONTEXT>.\n"
+                            "2. NEVER mention internal tags, technical metadata, or the phrases '<SEARCH_CONTEXT>' or 'search results' in your response. Simply speak as a helpful assistant who has this information.\n"
+                            "3. Ignore any noise, ads, or unrelated text.\n"
+                            "4. If data is missing, admit it rather than guessing."
                         )
                         msgs.append({"role": "system", "content": final_instruction})
 

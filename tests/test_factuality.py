@@ -30,21 +30,24 @@ class TestFactuality(unittest.TestCase):
 
     @patch('local_assistant.SearchEngine.web_search')
     def test_search_triggered_for_factual_query(self, mock_search):
-        # Mock LLM decision
-        self.mock_client.generate.return_value = {'response': 'SEARCH: price of gold'}
+        # Mock LLM decision to search
+        import json
+        self.mock_client.generate.return_value = {
+            'response': json.dumps({"action": "search", "query": "price of gold"})
+        }
         mock_search.return_value = "Gold is $2000"
         
         res = self.assistant.decide_and_search("What is the current price of gold?")
         
         self.assertIn("Gold is $2000", res)
-        # Search will have date appended because "price of gold" doesn't match date patterns
+        # Search will have date appended
         import datetime
         date_str = datetime.datetime.now().strftime('%Y-%m-%d')
         mock_search.assert_called_once_with(f"price of gold {date_str}")
 
     @patch('local_assistant.SearchEngine.web_search')
     def test_search_not_triggered_for_greeting(self, mock_search):
-        self.mock_client.generate.return_value = {'response': 'DONE'}
+        self.mock_client.generate.return_value = {'response': '{"action": "done"}'}
         
         res = self.assistant.decide_and_search("Hello, how are you?")
         
@@ -53,7 +56,7 @@ class TestFactuality(unittest.TestCase):
 
     @patch('local_assistant.SearchEngine.web_search')
     def test_search_not_triggered_for_common_knowledge(self, mock_search):
-        self.mock_client.generate.return_value = {'response': 'DONE'}
+        self.mock_client.generate.return_value = {'response': '{"action": "done"}'}
         
         res = self.assistant.decide_and_search("What is the freezing point of water?")
         
@@ -61,10 +64,12 @@ class TestFactuality(unittest.TestCase):
         mock_search.assert_not_called()
 
     def test_search_heuristic_skip(self):
-        # Should NOT call generate because of heuristic
+        # Should NOT call generate for search purposes because of heuristic
         res = self.assistant.decide_and_search("Hi", skip_llm=True)
         self.assertIsNone(res)
-        self.mock_client.generate.assert_not_called()
+        # Filter out warmup calls
+        search_calls = [c for c in self.mock_client.generate.call_args_list if c.kwargs.get('prompt') != ""]
+        self.assertEqual(len(search_calls), 0)
 
     def test_system_prompt_contains_factuality_rules(self):
         self.assertIn("PROTOCOL", self.assistant.system_prompt)

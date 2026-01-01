@@ -114,12 +114,41 @@ class ComplexityScorer:
         return min(1.0, score)
 
     @staticmethod
+    def get_safe_context_size(requested_ctx: int) -> int:
+        """
+        Calculates a VRAM-safe context window size based on system resources, 
+        model size, and native model limits.
+        """
+        model_max = ComplexityScorer._get_model_max_ctx()
+        model_size_mb = ComplexityScorer._get_loaded_model_size_mb()
+        _, vram_mb = get_system_resources()
+        
+        # --- ULTRA-CONSERVATIVE SAFETY FORMULA ---
+        # 1. Start with Total VRAM (fallback to 2048 if detection fails)
+        total_vram = vram_mb or 2048
+        
+        # 2. Subtract Model Weight Size
+        available_headroom = max(0, total_vram - model_size_mb)
+        
+        # 3. Subtract a fixed system/GUI buffer (256MB) to protect OS/Tkinter
+        safe_headroom = max(0, available_headroom - 256)
+        
+        # 4. Apply 70% safety cap (leaving 30% for CUDA graphs/fragmentation)
+        capped_headroom = safe_headroom * 0.7
+        
+        # 5. Token Calculation (Assume 0.25MB per token for KV cache + overhead)
+        vram_tokens_limit = int(capped_headroom / 0.25)
+        
+        # Clamp num_ctx between a safe floor (512) and the dynamic limit
+        return max(512, min(requested_ctx, model_max, vram_tokens_limit))
+
+    @staticmethod
     def analyze(user_input: str) -> Dict[str, Any]:
         """
         Calculates predicted complexity and creativity scores for the response.
         """
         if not user_input.strip():
-            return {"score": 0.0, "creativity": 0.0, "level": "MINIMAL", "params": {"num_ctx": 256, "num_predict": -1, "temperature": 0.1, "top_p": 0.4}}
+            return {"score": 0.0, "creativity": 0.0, "level": "MINIMAL", "params": {"num_ctx": 512, "num_predict": -1, "temperature": 0.1, "top_p": 0.4}}
 
         lower_input = user_input.lower()
         
@@ -171,30 +200,7 @@ class ComplexityScorer:
             requested_ctx = 4096
             base_repeat_penalty = 1.2
 
-        # 2. Hard Constraints
-        model_max = ComplexityScorer._get_model_max_ctx()
-        model_size_mb = ComplexityScorer._get_loaded_model_size_mb()
-        _, vram_mb = get_system_resources()
-        
-        # --- ULTRA-CONSERVATIVE SAFETY FORMULA ---
-        # 1. Start with Total VRAM (fallback to 2048 if detection fails)
-        total_vram = vram_mb or 2048
-        
-        # 2. Subtract Model Weight Size
-        available_headroom = max(0, total_vram - model_size_mb)
-        
-        # 3. Subtract a fixed system/GUI buffer (256MB) to protect OS/Tkinter
-        safe_headroom = max(0, available_headroom - 256)
-        
-        # 4. Apply 70% safety cap (leaving 30% for CUDA graphs/fragmentation)
-        capped_headroom = safe_headroom * 0.7
-        
-        # 5. Token Calculation (Assume 0.25MB per token for KV cache + overhead)
-        # This allows ~4000 tokens per 1GB of available headroom.
-        vram_tokens_limit = int(capped_headroom / 0.25)
-        
-        # Clamp num_ctx between a safe floor (512) and the dynamic limit
-        final_ctx = max(512, min(requested_ctx, model_max, vram_tokens_limit))
+        final_ctx = ComplexityScorer.get_safe_context_size(requested_ctx)
 
         # 3. Sampling (Creativity based)
         temperature = 0.1 + (creativity_score * 0.7)
@@ -220,5 +226,5 @@ class ComplexityScorer:
             "creativity": round(creativity_score, 2),
             "level": level,
             "params": params,
-            "details": f"C:{total_complexity} Cr:{creativity_score} (Max:{model_max}, VRAM:{vram_tokens_limit}, Model:{model_size_mb}MB)"
+            "details": f"C:{total_complexity} Cr:{creativity_score} (CTX:{final_ctx})"
         }

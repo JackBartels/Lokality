@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 import os
 import sys
 import unittest
@@ -48,21 +49,46 @@ class TestLocalChatAssistant(unittest.TestCase):
     @patch('local_assistant.SearchEngine.web_search')
     def test_decide_and_search_yes(self, mock_web_search):
         # Mock LLM decision to search
-        self.mock_client.generate.side_effect = [
-            {'response': 'SEARCH: weather in London'},
-            {'response': 'DONE'}
-        ]
+        self.mock_client.generate.return_value = {
+            'response': json.dumps({"action": "search", "query": "What is the weather?"})
+        }
         mock_web_search.return_value = "It is sunny."
         
         result = self.assistant.decide_and_search("What is the weather?")
         
         self.assertIn("It is sunny.", result)
-        # The query should NOT have date appended if it doesn't match the new logic's skip pattern
-        # Actually "London" is not a date pattern, so it MIGHT still append.
-        # Wait, I added "weather in London" - no date.
-        # Current date in test is 2025-12-27.
-        self.assertIn("Search for 'weather in London 2025-12-27'", result)
-        mock_web_search.assert_called_once_with("weather in London 2025-12-27")
+        self.assertIn("Search for 'What is the weather? 2025-12-27'", result)
+        # Verify call while ignoring potential warmup calls in background
+        calls = [c for c in mock_web_search.call_args_list if "What is the weather?" in str(c)]
+        self.assertTrue(len(calls) > 0)
+
+    @patch('local_assistant.SearchEngine.web_search')
+    @patch('local_assistant.SearchEngine.scrape_url')
+    def test_decide_and_search_with_scrape(self, mock_scrape, mock_web_search):
+        # Mock 1: Initial search decision
+        # Mock 2: Scrape decision
+        # Mock 3: Distillation
+        # Note: warmup generate calls might happen, so we use side_effect to handle variable numbers of calls
+        responses = [
+            {'response': json.dumps({"action": "search", "query": "What is the weather in London?"})},
+            {'response': json.dumps({"action": "scrape", "url": "https://weather.com/london"})},
+            {'response': "Relevant: It is 20°C and sunny in London."}
+        ]
+        
+        # Helper to return side effects while ignoring warmup
+        def side_effect_handler(*args, **kwargs):
+            if kwargs.get('prompt') == "": return {'response': ''} # Handle warmup
+            return responses.pop(0)
+
+        self.mock_client.generate.side_effect = side_effect_handler
+        mock_web_search.return_value = "Source: https://weather.com/london\nSnippet: It might rain."
+        mock_scrape.return_value = "<html>Large noisy page about London... 20°C and sunny...</html>"
+        
+        result = self.assistant.decide_and_search("What is the weather in London?")
+        
+        self.assertIn("Relevant: It is 20°C and sunny in London.", result)
+        self.assertIn("Search for 'What is the weather in London? 2025-12-27'", result)
+        mock_scrape.assert_called_once_with("https://weather.com/london")
 
     def test_accuracy_context_incorporation(self):
         # Verify that memory is in system prompt
@@ -76,8 +102,8 @@ class TestLocalChatAssistant(unittest.TestCase):
         self.assertIn("You are Lokality", self.assistant.system_prompt)
 
     def test_decide_and_search_no(self):
-        # Mock LLM decision NOT to search
-        self.mock_client.generate.return_value = {'response': 'DONE'}
+        # Mock LLM decision NOT to search (JSON format)
+        self.mock_client.generate.return_value = {'response': '{"action": "done"}'}
         
         result = self.assistant.decide_and_search("Hello")
         

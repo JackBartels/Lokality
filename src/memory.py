@@ -124,11 +124,10 @@ class MemoryStore:
         all_facts = []
         try:
             conn = self._get_conn()
-            # 1. ALWAYS include Assistant & User identity & most recent
+            # 1. ALWAYS include Assistant & User identity facts
             cursor = conn.execute("""
                 SELECT entity, fact, id FROM memory 
-                WHERE entity IN ('The User', 'The Assistant', 'Lokality', 'Assistant') 
-                OR id IN (SELECT id FROM memory ORDER BY created_at DESC LIMIT 3)
+                WHERE entity IN ('User', 'Assistant', 'The User', 'The Assistant', 'Lokality') 
                 ORDER BY created_at DESC LIMIT 10
             """)
             all_facts.extend([{"id": r['id'], "entity": r['entity'], "fact": r['fact']} for r in cursor.fetchall()])

@@ -50,5 +50,27 @@ class TestSearchEngine(unittest.TestCase):
         results = SearchEngine.web_search("test query")
         self.assertIn("CRITICAL: Web search failed due to a connectivity issue", results)
 
+    @patch('search_engine.requests.get')
+    def test_scrape_url_success(self, mock_get):
+        # Mock HTML response
+        mock_response = MagicMock()
+        mock_response.text = "<html><body><header>Nav</header><p>Main content</p><footer>Footer</footer></body></html>"
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+        
+        content = SearchEngine.scrape_url("https://example.com")
+        
+        # Should contain main content but NOT header/footer
+        self.assertIn("Main content", content)
+        self.assertNotIn("Nav", content)
+        self.assertNotIn("Footer", content)
+
+    @patch('search_engine.requests.get')
+    def test_scrape_url_error(self, mock_get):
+        mock_get.side_effect = Exception("HTTP 404")
+        
+        content = SearchEngine.scrape_url("https://example.com/bad")
+        self.assertIn("Failed to scrape URL 'https://example.com/bad': HTTP 404", content)
+
 if __name__ == "__main__":
     unittest.main()
