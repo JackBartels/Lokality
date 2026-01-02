@@ -12,12 +12,15 @@ class TestFactuality(unittest.TestCase):
     def setUp(self):
         # We need to patch MemoryStore before LocalChatAssistant is instantiated
         self.memory_patcher = patch('local_assistant.MemoryStore')
-        self.mock_memory_class = self.memory_patcher.start()
         self.mock_memory = self.memory_patcher.start().return_value
         self.mock_memory.get_relevant_facts.return_value = []
 
         self.client_patcher = patch('local_assistant.client')
         self.mock_client = self.client_patcher.start()
+
+        self.ctx_patcher = patch('local_assistant.ComplexityScorer.get_safe_context_size')
+        self.mock_ctx = self.ctx_patcher.start()
+        self.mock_ctx.return_value = 2048
 
         # Now instantiate
         self.assistant = LocalChatAssistant()
@@ -26,6 +29,7 @@ class TestFactuality(unittest.TestCase):
     def tearDown(self):
         self.memory_patcher.stop()
         self.client_patcher.stop()
+        self.ctx_patcher.stop()
 
     @patch('local_assistant.SearchEngine.web_search')
     def test_search_triggered_for_factual_query(self, mock_search):

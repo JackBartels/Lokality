@@ -26,6 +26,11 @@ class TestLocalChatAssistant(unittest.TestCase):
         self.patchers['client'] = patch('local_assistant.client')
         self.mocks['client'] = self.patchers['client'].start()
 
+        # ComplexityScorer patch
+        self.patchers['ctx'] = patch('local_assistant.ComplexityScorer.get_safe_context_size')
+        self.mocks['ctx'] = self.patchers['ctx'].start()
+        self.mocks['ctx'].return_value = 2048
+
         # Mock datetime for determinism
         self.patchers['datetime'] = patch('local_assistant.datetime')
         self.mocks['datetime'] = self.patchers['datetime'].start()
