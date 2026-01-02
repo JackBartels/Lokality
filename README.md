@@ -51,6 +51,7 @@ PYTHONPATH=src .venv/bin/python3 -m unittest discover tests
 - **Real-Time Web Search**: Dynamically decides when to search the internet using DuckDuckGo to provide up-to-date information.
 - **Dynamic Complexity Scoring**: Analyzes user prompts to predict required thinking effort and creativity, dynamically adjusting model parameters (context window, temperature, penalties) and ensuring VRAM safety.
 - **Model & System Info**: Use `/info` to toggle a live info bar showing Model, Remaining Context, Long-term Memory size, and RAM/VRAM usage.
+- **Persistent Toggles**: Toggles like `/debug` and `/info` now persist between application sessions, automatically restoring your preferred UI state on launch.
 - **Advanced Markdown Support**: 
     - Full support for **Headings**, **Bold**, **Italics**, **Strikethrough**, **Subscript**, and **Superscript**.
     - Nested styling (e.g., ***Bold Italic***) support.

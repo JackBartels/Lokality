@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 res/memory.db*
+res/settings.json
 .gemini/
 .vscode/**
 logs/

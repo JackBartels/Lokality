@@ -52,6 +52,11 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 - **Hardware-Safe Scaling**: Dynamically adjusts `num_ctx` based on available VRAM headroom to prevent OOM errors while maximizing context for complex tasks.
 - **Creativity Mapping**: Predicts creative intent to adjust sampling parameters (`temperature`, `top_p`, `top_k`) for more varied or deterministic responses.
 
+### 6. Persistent Settings
+- **State Preservation**: Certain UI and session toggles (e.g., `debug` mode, `info` panel visibility) are persisted between application restarts.
+- **Storage**: Settings are stored in a lightweight JSON format (`res/settings.json`), managed by the `Settings` class in `src/settings.py`.
+- **Initialization**: Persistent states are applied during the asynchronous initialization phase to ensure the UI correctly reflects the user's last session state upon startup.
+
 ## Project Structure
 
 - `src/`: Refactored into specialized modules.
@@ -61,6 +66,7 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
   - `theme.py`: UI styling, colors, and font definitions.
   - `markdown_engine.py`: Dispatcher-based logic for rendering Markdown tokens into Tkinter widgets. Supports complex nesting and modern Mistune plugins.
   - `logger.py`: Centralized logging configuration with automatic file-based persistence and cleanup logic.
+  - `settings.py`: Handles loading and saving of persistent application settings.
   - `shell_integration.py`: PTY-based logic for the direct Ollama bypass.
   - `local_assistant.py`: Core logic for conversation management and system prompt templating.
   - `memory.py`: Low-level SQLite database interface with FTS5 triggers.
@@ -71,6 +77,7 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
   - `utils.py`: Shared utilities (rounded rectangles, ANSI stripping, environment health checks).
 - `res/`: Persistent data.
   - `memory.db`: The SQLite database for long-term memory.
+  - `settings.json`: Persistent application configuration (ignored by git).
 - `launch.sh`: Main entry point for launching the application via `src/app.py`.
 
 ## Development Conventions
@@ -80,4 +87,5 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 - **Selective Learning**: The assistant is extractive and strict, focusing on permanent user attributes and identity facts.
 - **Code Quality**: Strict adherence to Pylint standards. A perfect **10.00/10** score is required. Disabling Pylint warnings via comments (e.g., `# pylint: disable=...`) is **STRICTLY FORBIDDEN**. Code must be refactored to comply with rules and best practices.
 - **Testing**: All changes must be verified with the test suite: `PYTHONPATH=src .venv/bin/python -m unittest discover tests`.
+- **GitHub Interaction**: Always use `gh` commands when interacting with GitHub (PRs, issues, repository metadata, etc.).
 - **Git & Version Control**: NEVER execute `git commit` or any command that modifies the commit history unless explicitly instructed to do so by the user for a specific set of changes. Preliminary staging (`git add`) is acceptable for preparation, but final commits are user-gated.

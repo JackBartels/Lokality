@@ -5,10 +5,10 @@ Handles web searching via DuckDuckGo and URL scraping.
 import requests
 from bs4 import BeautifulSoup
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
 except ImportError:
     try:
-        from ddgs import DDGS
+        from duckduckgo_search import DDGS
     except ImportError:
         # Fallback for environments where neither is found during type checking/linting
         DDGS = None
