@@ -24,6 +24,7 @@ from complexity_scorer import ComplexityScorer
 from config import VERSION
 from logger import logger
 from markdown_engine import MarkdownEngine
+from settings import Settings
 from shell_integration import ShellIntegration
 from theme import Theme
 from ui_components import CustomScrollbar, InfoPanel
@@ -102,6 +103,16 @@ class CanvasConfig:
 
 class AssistantApp:
     """The main application class for the Lokality GUI."""
+    SLASH_COMMANDS = [
+        ["/bypass", "Send raw prompt directly to model"],
+        ["/clear", "Clear conversation history"],
+        ["/debug", "Toggle debug mode"],
+        ["/forget", "Reset long-term memory"],
+        ["/help", "Show this help message"],
+        ["/info", "Toggle model & system information"],
+        ["/exit", "Exit the application"]
+    ]
+
     def __init__(self, root):
         self.root = root
         self.root.report_callback_exception = self.handle_tk_exception
@@ -111,21 +122,19 @@ class AssistantApp:
         self.root.configure(bg=Theme.BG_COLOR)
 
         self.fonts = Theme.get_fonts()
+        self.settings = Settings()
         self.state = AppState()
+
+        # Load persistent toggles
+        config.DEBUG = self.settings.get("debug", False)
+        self.state.show_info = self.settings.get("show_info", False)
+        if config.DEBUG:
+            logger.setLevel(logging.DEBUG)
+
         self.ui = AppUI()
 
         self._setup_markdown()
         self._setup_ui()
-
-        self.slash_commands = [
-            ["/bypass", "Send raw prompt directly to model"],
-            ["/clear", "Clear conversation history"],
-            ["/debug", "Toggle debug mode"],
-            ["/forget", "Reset long-term memory"],
-            ["/help", "Show this help message"],
-            ["/info", "Toggle model & system information"],
-            ["/exit", "Exit the application"]
-        ]
 
         self.root.bind("<Escape>", self.cancel_generation)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -159,6 +168,9 @@ class AssistantApp:
             self.state.assistant = local_assistant.LocalChatAssistant()
             info_print("Chat Assistant ready.")
 
+            # Initial info update if panel is visible
+            self.update_info_display()
+
             _, errors = verify_env_health()
             for err in errors:
                 error_print(f"Environment check failed: {err}")
@@ -184,7 +196,8 @@ class AssistantApp:
 
         self.ui.info_panel = InfoPanel(self.root, Theme, self.fonts)
         self.ui.info_panel.grid(row=1, column=0, sticky="ew", padx=10, pady=0)
-        self.ui.info_panel.grid_remove()
+        if not self.state.show_info:
+            self.ui.info_panel.grid_remove()
 
         self._setup_input_area()
         self._bind_events()
@@ -395,7 +408,7 @@ class AssistantApp:
         """Provides command completion for slash commands."""
         content = self.ui.input.field.get("1.0", tk.INSERT).strip()
         if content.startswith("/"):
-            matches = [c[0] for c in self.slash_commands if c[0].startswith(content)]
+            matches = [c[0] for c in self.SLASH_COMMANDS if c[0].startswith(content)]
             if matches:
                 self.ui.input.field.delete("1.0", tk.INSERT)
                 self.ui.input.field.insert("1.0", min(matches, key=len))
@@ -422,7 +435,7 @@ class AssistantApp:
         if content.startswith("/"):
             parts = content.split()
             first = parts[0] if parts else ""
-            if any(first == cmd[0] for cmd in self.slash_commands):
+            if any(first == cmd[0] for cmd in self.SLASH_COMMANDS):
                 self.ui.input.field.tag_add("command_highlight", "1.0", f"1.{len(first)}")
 
     def send_message(self):
@@ -566,6 +579,7 @@ class AssistantApp:
 
     def _cmd_debug(self, _):
         config.DEBUG = not config.DEBUG
+        self.settings.set("debug", config.DEBUG)
         msg = f"[*] Debug mode {"ENABLED" if config.DEBUG else "DISABLED"}"
         info_print(msg)
         logger.setLevel(logging.DEBUG if config.DEBUG else logging.INFO)
@@ -577,7 +591,7 @@ class AssistantApp:
 
     def _cmd_help(self, _):
         logger.info("Help command invoked.")
-        lines = [f"    {c}\t{d}" for c, d in self.slash_commands]
+        lines = [f"    {c}\t{d}" for c, d in self.SLASH_COMMANDS]
         print("Available Commands:\n" + "\n".join(lines))
         self.state.msg_queue.put(("separator", None, None))
         self.state.msg_queue.put(("enable", None, None))
@@ -755,6 +769,7 @@ class AssistantApp:
             self.update_info_display()
         elif action == "toggle_info":
             self.state.show_info = self.ui.info_panel.toggle()
+            self.settings.set("show_info", self.state.show_info)
             self.update_info_display()
         elif action == "update_info_ui":
             self.ui.info_panel.update_stats(content)
