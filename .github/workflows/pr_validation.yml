@@ -1,0 +1,41 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-tk xvfb
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Compile check
+      run: |
+        python -m compileall src/
+
+    - name: Pylint
+      run: |
+        # Run pylint on src and tests.
+        PYTHONPATH=src pylint src/ tests/ --init-hook='import sys; sys.path.append("src")'
+
+    - name: Run tests
+      run: |
+        # Use xvfb to run tests that might need a display (Tkinter)
+        PYTHONPATH=src xvfb-run python -m unittest discover tests

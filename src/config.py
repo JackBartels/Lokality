@@ -1,3 +1,6 @@
+"""
+Configuration constants for Lokality.
+"""
 import os
 
 VERSION = "v0.1.1"

@@ -1,45 +1,56 @@
-from datetime import datetime
+"""
+Unit tests for the LocalChatAssistant class.
+"""
 import json
-import os
-import sys
 import unittest
-from unittest.mock import MagicMock, patch
-
-# Add src to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
-
-import local_assistant
+from datetime import datetime
+from unittest.mock import patch
+from memory import MemoryStore
 from local_assistant import LocalChatAssistant
 
 class TestLocalChatAssistant(unittest.TestCase):
+    """Test suite for LocalChatAssistant."""
+
     def setUp(self):
-        self.memory_patcher = patch('local_assistant.MemoryStore')
-        self.mock_memory_class = self.memory_patcher.start()
-        self.mock_memory_instance = self.mock_memory_class.return_value
-        self.mock_memory_instance.get_relevant_facts.return_value = []
-        
-        self.client_patcher = patch('local_assistant.client')
-        self.mock_client = self.client_patcher.start()
+        """Set up test environment."""
+        self.patchers = {}
+        self.mocks = {}
+
+        # MemoryStore patch
+        self.patchers['memory'] = patch('local_assistant.MemoryStore')
+        self.mocks['memory_class'] = self.patchers['memory'].start()
+        self.mocks['memory_instance'] = self.mocks['memory_class'].return_value
+        self.mocks['memory_instance'].get_relevant_facts.return_value = []
+
+        # client patch
+        self.patchers['client'] = patch('local_assistant.client')
+        self.mocks['client'] = self.patchers['client'].start()
+
+        # ComplexityScorer patch
+        self.patchers['ctx'] = patch('local_assistant.ComplexityScorer.get_safe_context_size')
+        self.mocks['ctx'] = self.patchers['ctx'].start()
+        self.mocks['ctx'].return_value = 2048
 
         # Mock datetime for determinism
-        self.datetime_patcher = patch('local_assistant.datetime')
-        self.mock_datetime = self.datetime_patcher.start()
-        self.mock_datetime.now.return_value = datetime(2025, 12, 27, 10, 30)
-        self.mock_datetime.strftime = datetime.strftime
-        
+        self.patchers['datetime'] = patch('local_assistant.datetime')
+        self.mocks['datetime'] = self.patchers['datetime'].start()
+        self.mocks['datetime'].now.return_value = datetime(2025, 12, 27, 10, 30)
+        self.mocks['datetime'].strftime = datetime.strftime
+
         self.assistant = LocalChatAssistant()
 
     def tearDown(self):
-        self.memory_patcher.stop()
-        self.client_patcher.stop()
-        self.datetime_patcher.stop()
+        """Clean up test environment."""
+        for patcher in self.patchers.values():
+            patcher.stop()
 
     def test_update_system_prompt(self):
-        self.mock_memory_instance.get_relevant_facts.return_value = [
+        """Test that system prompt is updated with relevant facts and time."""
+        self.mocks['memory_instance'].get_relevant_facts.return_value = [
             {"entity": "User", "fact": "Likes pizza", "id": 1}
         ]
-        self.assistant._update_system_prompt("query")
-        
+        self.assistant.update_system_prompt("query")
+
         self.assertIn("Likes pizza", self.assistant.system_prompt)
         self.assertIn("Lokality", self.assistant.system_prompt)
         # Check if date and time are in prompt
@@ -48,86 +59,100 @@ class TestLocalChatAssistant(unittest.TestCase):
 
     @patch('local_assistant.SearchEngine.web_search')
     def test_decide_and_search_yes(self, mock_web_search):
+        """Test that search is performed when LLM decides so."""
         # Mock LLM decision to search
-        self.mock_client.generate.return_value = {
+        self.mocks['client'].generate.return_value = {
             'response': json.dumps({"action": "search", "query": "What is the weather?"})
         }
         mock_web_search.return_value = "It is sunny."
-        
+
         result = self.assistant.decide_and_search("What is the weather?")
-        
+
         self.assertIn("It is sunny.", result)
-        self.assertIn("Search for 'What is the weather? 2025-12-27'", result)
+        self.assertIn("--- Search for 'What is the weather?' ---", result)
         # Verify call while ignoring potential warmup calls in background
-        calls = [c for c in mock_web_search.call_args_list if "What is the weather?" in str(c)]
+        calls = [
+            c for c in mock_web_search.call_args_list if "What is the weather?" in str(c)
+        ]
         self.assertTrue(len(calls) > 0)
 
     @patch('local_assistant.SearchEngine.web_search')
     @patch('local_assistant.SearchEngine.scrape_url')
     def test_decide_and_search_with_scrape(self, mock_scrape, mock_web_search):
+        """Test search and scrape workflow."""
         # Mock 1: Initial search decision
         # Mock 2: Scrape decision
         # Mock 3: Distillation
-        # Note: warmup generate calls might happen, so we use side_effect to handle variable numbers of calls
+        # Note: warmup generate calls might happen, so we use side_effect
         responses = [
-            {'response': json.dumps({"action": "search", "query": "What is the weather in London?"})},
+            {'response': json.dumps(
+                {"action": "search", "query": "What is the weather in London?"}
+            )},
             {'response': json.dumps({"action": "scrape", "url": "https://weather.com/london"})},
             {'response': "Relevant: It is 20°C and sunny in London."}
         ]
-        
+
         # Helper to return side effects while ignoring warmup
-        def side_effect_handler(*args, **kwargs):
-            if kwargs.get('prompt') == "": return {'response': ''} # Handle warmup
+        def side_effect_handler(*_args, **kwargs):
+            if kwargs.get('prompt') == "":
+                return {'response': ''} # Handle warmup
             return responses.pop(0)
 
-        self.mock_client.generate.side_effect = side_effect_handler
-        mock_web_search.return_value = "Source: https://weather.com/london\nSnippet: It might rain."
-        mock_scrape.return_value = "<html>Large noisy page about London... 20°C and sunny...</html>"
-        
+        self.mocks['client'].generate.side_effect = side_effect_handler
+        mock_web_search.return_value = (
+            "Source: https://weather.com/london\nSnippet: It might rain."
+        )
+        mock_scrape.return_value = (
+            "<html>Large noisy page about London... 20°C and sunny...</html>"
+        )
+
         result = self.assistant.decide_and_search("What is the weather in London?")
-        
+
         self.assertIn("Relevant: It is 20°C and sunny in London.", result)
-        self.assertIn("Search for 'What is the weather in London? 2025-12-27'", result)
+        self.assertIn("--- Search for 'What is the weather in London?' ---", result)
         mock_scrape.assert_called_once_with("https://weather.com/london")
 
     def test_accuracy_context_incorporation(self):
+        """Test that identity and context are incorporated into system prompt."""
         # Verify that memory is in system prompt
-        self.mock_memory_instance.get_relevant_facts.return_value = [
+        self.mocks['memory_instance'].get_relevant_facts.return_value = [
             {"entity": "User", "fact": "Has a dog named Buster", "id": 1}
         ]
-        self.assistant._update_system_prompt("dog")
+        self.assistant.update_system_prompt("dog")
         self.assertIn("Has a dog named Buster", self.assistant.system_prompt)
-        
+
         # Verify that system prompt starts with identity
         self.assertIn("You are Lokality", self.assistant.system_prompt)
 
     def test_decide_and_search_no(self):
+        """Test that no search is performed when LLM decides so."""
         # Mock LLM decision NOT to search (JSON format)
-        self.mock_client.generate.return_value = {'response': '{"action": "done"}'}
-        
+        self.mocks['client'].generate.return_value = {'response': '{"action": "done"}'}
+
         result = self.assistant.decide_and_search("Hello")
-        
+
         self.assertIsNone(result)
 
     def test_clear_long_term_memory(self):
+        """Test clearing long term memory."""
         self.assistant.clear_long_term_memory()
-        self.mock_memory_instance.clear.assert_called_once()
+        self.mocks['memory_instance'].clear.assert_called_once()
 
     @patch('local_assistant.MemoryManager.extract_facts')
     def test_perform_memory_update_integration(self, mock_extract):
-        # Setup: Real MemoryStore (in-memory) for integration feel, 
+        """Test memory update integration."""
+        # Setup: Real MemoryStore (in-memory) for integration feel,
         # but we already mocked it in setUp. Let's use a real one for this specific test.
-        from memory import MemoryStore
         real_memory = MemoryStore(db_path=":memory:")
         self.assistant.memory = real_memory
-        
+
         mock_extract.return_value = [
             {'op': 'add', 'entity': 'User', 'fact': 'Lives in Tokyo'}
         ]
-        
+
         # This calls the logic that filters and commits to DB
-        self.assistant._perform_memory_update("I live in Tokyo", "That's great!")
-        
+        self.assistant.perform_memory_update("I live in Tokyo", "That's great!")
+
         facts = real_memory.get_all_facts()
         self.assertEqual(len(facts), 1)
         self.assertEqual(facts[0]['fact'], 'Lives in Tokyo')

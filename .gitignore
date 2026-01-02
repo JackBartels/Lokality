@@ -5,3 +5,4 @@ res/memory.db*
 .gemini/
 .vscode/**
 logs/
+.env

@@ -24,7 +24,7 @@ Lokality is a local-first, privacy-focused desktop AI assistant wrapper. Powered
 
 3. **Install dependencies**:
    ```bash
-   pip install ollama ddgs mistune psutil
+   pip install -r requirements.txt
    ```
 
 4. **Model Setup**:
@@ -39,13 +39,9 @@ Lokality is a local-first, privacy-focused desktop AI assistant wrapper. Powered
    ```
 
 ## Testing
-The project includes a comprehensive suite of unit tests. To run them, execute:
+The project includes a comprehensive suite of unit tests. To run them while adhering to project paths, execute:
 ```bash
-./.venv/bin/python3 -m unittest discover tests
-```
-Alternatively, if your virtual environment is active:
-```bash
-python3 -m unittest discover tests
+PYTHONPATH=src .venv/bin/python3 -m unittest discover tests
 ```
 
 ## Features
@@ -66,6 +62,7 @@ python3 -m unittest discover tests
 - **Modern GUI**: A sleek, blue-toned desaturated purple interface featuring 6px thick rounded borders, dynamic message separators, and a responsive flow layout.
 - **Smart Input**: A dynamic input box that expands vertically as you type (including automatic expansion for word-wrapped lines) and features tab-completion for slash commands.
 - **Persistent Logging**: Centralized logging system that records session details to the `logs/` directory with automatic cleanup of files older than 30 days.
+- **CI/CD & Code Quality**: Rigorous automated validation using GitHub Actions, ensuring 100% test pass rates and a perfect 10.00/10 Pylint score on every pull request.
 - **Optimized Architecture**: Refactored with a dispatcher-based rendering engine and consolidated background process management for improved performance and maintainability.
 - **Model Agnostic**: Can be configured to work with any local model available via Ollama using the `LOKALITY_MODEL` environment variable.
 
