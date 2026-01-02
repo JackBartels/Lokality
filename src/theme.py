@@ -1,6 +1,13 @@
+"""
+Theme configuration for Lokality.
+Defines colors and fonts used throughout the GUI.
+"""
 import sys
 
 class Theme:
+    """
+    Defines the visual style of the application.
+    """
     # --- COLORS ---
     BG_COLOR = "#212121"       # Dark Grey
     FG_COLOR = "#ECECEC"       # Off-white
@@ -9,17 +16,17 @@ class Theme:
     SLASH_COLOR = "#B3E5FC"    # Brighter version of user blue
     INPUT_BG = "#303030"       # Slightly lighter grey for inputs
     BUTTON_FG = "#FFFFFF"
-    
+
     # Message separators
     SEPARATOR_COLOR = "#2A2A2A"
-    
+
     # Tags Colors
     USER_COLOR = "#90CAF9"
     SYSTEM_COLOR = "#B0BEC5"
     ERROR_COLOR = "#EF9A9A"
     CANCELLED_COLOR = "#B05555"
     LINK_COLOR = "#64B5F6"
-    
+
     # Markdown specific
     CODE_BG = "#2D2D2D"
     CODE_FG = "#F8F8F2"
@@ -28,9 +35,10 @@ class Theme:
 
     @classmethod
     def get_fonts(cls):
+        """Returns a dictionary of font definitions."""
         base_family = "Roboto"
         code_family = "Consolas" if sys.platform == "win32" else "Monospace"
-        
+
         return {
             "base": (base_family, 11),
             "bold": (base_family, 11, "bold"),
@@ -45,3 +53,8 @@ class Theme:
             "unit": (base_family, 9, "bold"),
             "tooltip": (base_family, 9)
         }
+
+    @staticmethod
+    def get_color(name):
+        """Returns a color value by name."""
+        return getattr(Theme, name, None)

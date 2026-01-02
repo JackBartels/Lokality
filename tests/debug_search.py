@@ -1,14 +1,12 @@
-import sys
-import os
-
-# Ensure src is in path
-sys.path.append(os.path.join(os.getcwd(), 'src'))
-
+"""
+Debug script for testing search functionality manually.
+"""
 from search_engine import SearchEngine
 
-def test_query(query):
-    print(f"\n--- Testing Search for: '{query}' ---")
-    results = SearchEngine.web_search(query)
+def test_query(query_text):
+    """Run a test query and print results."""
+    print(f"\n--- Testing Search for: '{query_text}' ---")
+    results = SearchEngine.web_search(query_text)
     print(results)
 
 if __name__ == "__main__":

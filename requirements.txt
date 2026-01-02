@@ -1,0 +1,7 @@
+ollama
+duckduckgo-search
+mistune
+psutil
+beautifulsoup4
+requests
+pylint
