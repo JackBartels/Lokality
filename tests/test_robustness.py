@@ -6,6 +6,7 @@ import sqlite3
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from memory import MemoryStore
 from utils import verify_env_health
 
@@ -16,8 +17,12 @@ class TestRobustness(unittest.TestCase):
         """Set up test variables."""
         self.write_result = None
 
-    def test_verify_environment_writable(self):
+    @patch('utils.ollama.Client')
+    def test_verify_environment_writable(self, mock_ollama):
         """Test environment health check."""
+        # Mock Ollama to respond successfully
+        mock_ollama.return_value.list.return_value = {'models': []}
+
         # This should pass in the current environment
         success, errors = verify_env_health()
         self.assertTrue(success, f"Environment check failed: {errors}")

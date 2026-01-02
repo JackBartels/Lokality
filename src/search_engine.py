@@ -4,7 +4,14 @@ Handles web searching via DuckDuckGo and URL scraping.
 """
 import requests
 from bs4 import BeautifulSoup
-from ddgs import DDGS
+try:
+    from duckduckgo_search import DDGS
+except ImportError:
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        # Fallback for environments where neither is found during type checking/linting
+        DDGS = None
 
 from logger import logger
 from utils import debug_print
