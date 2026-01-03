@@ -10,9 +10,7 @@ import sys
 import threading
 import tkinter as tk
 import traceback
-from dataclasses import dataclass, field
 from tkinter import font
-from typing import Optional, Any
 
 import mistune
 import ollama
@@ -25,105 +23,27 @@ from config import VERSION
 from logger import logger
 from markdown_engine import MarkdownEngine
 from settings import Settings
-from shell_integration import ShellIntegration
-from theme import Theme
+from shell_integration import run_ollama_bypass
+import theme as Theme
+from app_state import AppState, AppUI, CanvasConfig, SLASH_COMMANDS
 from ui_components import CustomScrollbar, InfoPanel
 from utils import (
     RedirectedStdout,
     debug_print,
     error_print,
     format_error_msg,
+    get_ollama_client,
     info_print,
     round_rectangle,
+    thread_excepthook,
     verify_env_health,
 )
 
-def thread_excepthook(args):
-    """Global hook for catching uncaught exceptions in threads."""
-    err_msg = (
-        f"Thread Error ({args.thread.name}): "
-        f"{args.exc_type.__name__}: {args.exc_value}"
-    )
-    error_print(err_msg)
-    if config.DEBUG:
-        traceback.print_exception(
-            args.exc_type, args.exc_value, args.exc_traceback
-        )
-
 threading.excepthook = thread_excepthook
-
-@dataclass
-class IndicatorState:
-    """Holds the thinking indicator state."""
-    active: bool = False
-    char: str = config.INDICATOR_CHARS[0]
-
-@dataclass
-class ResponseState:
-    """Holds the current response state."""
-    full_text: str = ""
-    last_rendered_len: int = 0
-
-@dataclass
-class AppState:
-    """Holds the application state."""
-    assistant: Optional[Any] = None
-    stop_generation: bool = False
-    active_process: Optional[Any] = None
-    response: ResponseState = field(default_factory=ResponseState)
-    show_info: bool = False
-    msg_queue: queue.Queue = field(default_factory=queue.Queue)
-    indicator: IndicatorState = field(default_factory=IndicatorState)
-
-@dataclass
-class ChatUI:
-    """Holds chat display UI component references."""
-    canvas: Optional[tk.Canvas] = None
-    bg_id: Optional[int] = None
-    inner: Optional[tk.Frame] = None
-    window_id: Optional[int] = None
-    display: Optional[tk.Text] = None
-    scrollbar: Optional[CustomScrollbar] = None
-
-@dataclass
-class InputUI:
-    """Holds input area UI component references."""
-    canvas: Optional[tk.Canvas] = None
-    bg_id: Optional[int] = None
-    inner: Optional[tk.Frame] = None
-    window_id: Optional[int] = None
-    field: Optional[tk.Text] = None
-
-@dataclass
-class AppUI:
-    """Holds UI component references."""
-    chat: ChatUI = field(default_factory=ChatUI)
-    input: InputUI = field(default_factory=InputUI)
-    info_panel: Optional[InfoPanel] = None
-    tooltip_window: Optional[tk.Toplevel] = None
-
-@dataclass
-class CanvasConfig:
-    """Configuration for canvas region updates."""
-    canvas: tk.Canvas
-    bg_id: int
-    size: tuple[int, int]
-    radius: int
-    style: tuple[str, int, str]
-    win_id: int
-    pad: tuple[int, float]
 
 class AssistantApp:
     """The main application class for the Lokality GUI."""
-    SLASH_COMMANDS = [
-        ["/bypass", "Send raw prompt directly to model"],
-        ["/clear", "Clear conversation history"],
-        ["/debug", "Toggle debug mode"],
-        ["/forget", "Reset long-term memory"],
-        ["/help", "Show this help message"],
-        ["/info", "Toggle model & system information"],
-        ["/exit", "Exit the application"]
-    ]
+    SLASH_COMMANDS = SLASH_COMMANDS
 
     def __init__(self, root):
         self.root = root
@@ -148,9 +68,9 @@ class AssistantApp:
         self._setup_markdown()
         self._setup_ui()
 
-        self.root.bind("<Escape>", self.cancel_generation)
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.root.after(100, self.check_queue)
+        self.root.bind("<Escape>", self._cancel_generation)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.root.after(100, self._check_queue)
 
         sys.stdout = RedirectedStdout(self.state.msg_queue, "system")
         sys.stderr = RedirectedStdout(self.state.msg_queue, "error")
@@ -162,7 +82,7 @@ class AssistantApp:
         """Initializes the markdown engine and parser."""
         try:
             self.markdown_engine = MarkdownEngine(
-                None, self.handle_tooltip
+                None, self._handle_tooltip
             )
             self.md_parser = mistune.create_markdown(
                 renderer=None,
@@ -170,7 +90,7 @@ class AssistantApp:
             )
         except (ImportError, AttributeError):
             self.markdown_engine = MarkdownEngine(
-                None, self.handle_tooltip
+                None, self._handle_tooltip
             )
             self.md_parser = lambda x: [{"type": "text", "text": x}]
 
@@ -181,14 +101,14 @@ class AssistantApp:
             info_print("Chat Assistant ready.")
 
             # Initial info update if panel is visible
-            self.update_info_display()
+            self._update_info_display()
 
             _, errors = verify_env_health()
             for err in errors:
                 error_print(f"Environment check failed: {err}")
 
             print("Type /help for commands.\n")
-        except (ImportError, RuntimeError, ValueError) as exc:
+        except (ImportError, RuntimeError, ValueError, ConnectionError) as exc:
             error_print(f"Initialization failed: {format_error_msg(exc)}")
 
     def handle_tk_exception(self, exc, val, tback):
@@ -207,13 +127,14 @@ class AssistantApp:
         self.markdown_engine.text_widget = self.ui.chat.display
 
         self.ui.info_panel = InfoPanel(self.root, Theme, self.fonts)
+        self.ui.info_panel.show_info = self.state.show_info
         self.ui.info_panel.grid(row=1, column=0, sticky="ew", padx=10, pady=0)
         if not self.state.show_info:
             self.ui.info_panel.grid_remove()
 
         self._setup_input_area()
         self._bind_events()
-        self.adjust_input_height()
+        self._adjust_input_height()
 
     def _setup_chat_area(self):
         """Sets up the scrollable chat display area."""
@@ -249,11 +170,61 @@ class AssistantApp:
             bg=Theme.BG_COLOR
         )
         self.ui.chat.scrollbar.grid(row=0, column=1, sticky="ns", pady=15)
-        self.ui.chat.display.config(yscrollcommand=self.ui.chat.scrollbar.set)
+
+        # Modified scroll command to track auto-scroll state
+        def on_display_scroll(*args):
+            self.ui.chat.scrollbar.set(*args)
+            self._check_scroll_position()
+
+        self.ui.chat.display.config(yscrollcommand=on_display_scroll)
+
+        # "Jump to latest" button (Canvas-based for styling)
+        self.ui.chat.jump_btn_canvas = tk.Canvas(
+            self.root, width=300, height=80,
+            bg=Theme.BG_COLOR, highlightthickness=0, bd=0
+        )
+
+        # Shadow (drawn first)
+        round_rectangle(
+            self.ui.chat.jump_btn_canvas, (8, 8, 292, 72), radius=25,
+            fill="#111111", outline="", width=0, tags="btn_shadow"
+        )
+
+        # Draw the button content
+        round_rectangle(
+            self.ui.chat.jump_btn_canvas, (2, 2, 284, 64), radius=25,
+            fill=Theme.JUMP_BTN_BG, outline="", width=0, tags="btn_bg"
+        )
+
+        # Text (Simple, no border)
+        self.ui.chat.jump_btn_canvas.create_text(
+            143, 33, text="↓   Jump to latest", fill=Theme.FG_COLOR,
+            font=self.fonts["bold"], tags="btn_text"
+        )
+
+        # Bindings
+        for tag in ("btn_bg", "btn_text", "btn_shadow"):
+            self.ui.chat.jump_btn_canvas.tag_bind(
+                tag, "<Button-1>", lambda e: self.scroll_to_bottom()
+            )
+            self.ui.chat.jump_btn_canvas.tag_bind(
+                tag, "<Enter>",
+                lambda e: self.ui.chat.jump_btn_canvas.config(cursor="hand2")
+            )
+            self.ui.chat.jump_btn_canvas.tag_bind(
+                tag, "<Leave>",
+                lambda e: self.ui.chat.jump_btn_canvas.config(cursor="")
+            )
 
         self._configure_tags()
         self.ui.chat.display.mark_set("assistant_msg_start", "1.0")
         self.ui.chat.display.mark_gravity("assistant_msg_start", tk.LEFT)
+
+        # Bind user scroll events to disable auto-scroll
+        self.ui.chat.display.bind("<MouseWheel>", self._on_manual_scroll)
+        self.ui.chat.display.bind("<Button-4>", self._on_manual_scroll)
+        self.ui.chat.display.bind("<Button-5>", self._on_manual_scroll)
+        self.ui.chat.display.bind("<B1-Motion>", self._on_manual_scroll)
 
     def _setup_input_area(self):
         """Sets up the user input field at the bottom."""
@@ -316,25 +287,23 @@ class AssistantApp:
 
     def _bind_events(self):
         """Binds GUI events to their respective handlers."""
-        self.ui.chat.canvas.bind("<Configure>", self.on_chat_canvas_configure)
-        self.ui.input.canvas.bind("<Configure>", self.on_lower_canvas_configure)
-        self.ui.input.field.bind("<Tab>", self.handle_tab)
-        self.ui.input.field.bind("<Return>", self.handle_return)
-        self.ui.input.field.bind("<KeyRelease>", self.on_key_release)
-        self.ui.input.canvas.bind(
-            "<Button-1>", lambda e: self.ui.input.field.focus_set()
-        )
-        self.ui.input.field.bind("<Configure>", self.adjust_input_height)
+        self.ui.chat.canvas.bind("<Configure>", self._on_chat_canvas_configure)
+        self.ui.input.canvas.bind("<Configure>", self._on_lower_canvas_configure)
+        self.ui.input.field.bind("<Tab>", self._handle_tab)
+        self.ui.input.field.bind("<Return>", self._handle_return)
+        self.ui.input.field.bind("<KeyRelease>", self._on_key_release)
+        self.ui.input.field.bind("<Control-c>", self._cancel_generation)
+        self.ui.input.field.bind("<Configure>", self._adjust_input_height)
 
     def _stop_active_process(self):
         """Safely terminates any active background process."""
-        if self.state.active_process:
+        if self.state.process.active:
             try:
-                if self.state.active_process.poll() is None:
-                    os.kill(self.state.active_process.pid, signal.SIGTERM)
+                if self.state.process.active.poll() is None:
+                    os.kill(self.state.process.active.pid, signal.SIGTERM)
             except OSError:
                 pass
-            self.state.active_process = None
+            self.state.process.active = None
 
     def _update_canvas_region(self, cfg: CanvasConfig):
         """Unified helper to update rounded rectangles on resize."""
@@ -350,7 +319,7 @@ class AssistantApp:
         cfg.canvas.coords(cfg.win_id, px, py)
         return nbg
 
-    def on_chat_canvas_configure(self, event):
+    def _on_chat_canvas_configure(self, event):
         """Updates the chat area border on resize."""
         if event.width < 50 or event.height < 50:
             return
@@ -365,12 +334,44 @@ class AssistantApp:
         )
         self.ui.chat.bg_id = self._update_canvas_region(cfg)
 
-    def on_lower_canvas_configure(self, event):
+    def _on_manual_scroll(self, _):
+        """Disables auto-scroll when user interacts with the chat history."""
+        # Only disable if user actually scrolls UP
+        if self.ui.chat.display.yview()[1] < 0.99:
+            self.state.auto_scroll = False
+            self._check_scroll_position()
+
+    def scroll_to_bottom(self):
+        """Scrolls the chat display to the very bottom."""
+        self.state.auto_scroll = True
+        self.ui.chat.display.see(tk.END)
+        self._check_scroll_position()
+
+    def _check_scroll_position(self):
+        """Shows or hides the jump button based on scroll state."""
+        if not self.ui.chat.jump_btn_canvas:
+            return
+
+        is_at_bottom = self.ui.chat.display.yview()[1] >= 0.99
+        if is_at_bottom:
+            self.state.auto_scroll = True
+            self.ui.chat.jump_btn_canvas.place_forget()
+        elif not self.state.auto_scroll:
+            # Place relative to the container. Since jump_btn_canvas parent is ui.chat.canvas,
+            # and ui.chat.canvas fills the area, this works.
+            # However, ensure it's on top. 'place' usually puts it on top.
+            self.ui.chat.jump_btn_canvas.place(
+                in_=self.ui.chat.canvas, relx=1.0, rely=1.0, anchor="se", x=-30, y=-30
+            )
+            # Explicit Tcl call to avoid Canvas.lift() override issues
+            self.root.tk.call('raise', str(self.ui.chat.jump_btn_canvas))
+
+    def _on_lower_canvas_configure(self, event):
         """Updates the input area border on resize."""
         if event.width > 50 and event.height > 20:
-            self.update_lower_border()
+            self._update_lower_border()
 
-    def adjust_input_height(self, _=None):
+    def _adjust_input_height(self, _=None):
         """Dynamically adjusts the input field height based on content."""
         try:
             if self.ui.input.field.winfo_width() <= 1:
@@ -394,12 +395,12 @@ class AssistantApp:
             total_h = self.ui.input.field.winfo_reqheight() + 20
             if abs(int(self.ui.input.canvas.cget("height")) - total_h) > 2:
                 self.ui.input.canvas.config(height=total_h)
-                self.update_lower_border(total_h)
+                self._update_lower_border(total_h)
         except tk.TclError:
             pass
 
-    def update_lower_border(self, forced_h=None):
-        """Updates the input area border rounded rectangle."""
+    def _update_lower_border(self, forced_h=None):
+        """Redraws the input area border."""
         w = self.ui.input.canvas.winfo_width()
         h = forced_h if forced_h is not None else self.ui.input.canvas.winfo_height()
         if w < 10 or h < 10:
@@ -417,55 +418,61 @@ class AssistantApp:
         )
         self.ui.input.bg_id = self._update_canvas_region(cfg)
 
-    def handle_tab(self, _):
-        """Provides command completion for slash commands."""
+    def _handle_tab(self, _):
+        """Handles Tab key for command completion (stub)."""
         content = self.ui.input.field.get("1.0", tk.INSERT).strip()
         if content.startswith("/"):
             matches = [c[0] for c in self.SLASH_COMMANDS if c[0].startswith(content)]
             if matches:
                 self.ui.input.field.delete("1.0", tk.INSERT)
                 self.ui.input.field.insert("1.0", min(matches, key=len))
-                self.highlight_commands()
             return "break"
         return None
 
-    def handle_return(self, event):
+    def _handle_return(self, event):
         """Sends the message on Enter, inserts newline on Shift+Enter."""
         if not event.state & 0x1:
             self.send_message()
             return "break"
         return None
 
-    def on_key_release(self, event=None):
-        """Handles post-key-press UI updates."""
-        self.adjust_input_height(event)
-        self.highlight_commands()
+    def _on_key_release(self, event=None):
+        """Triggers command highlighting and height adjustment."""
+        if event and event.keysym in ("Shift_L", "Shift_R"):
+            return
+        self._highlight_commands()
+        self._adjust_input_height()
 
-    def highlight_commands(self):
-        """Highlights known slash commands in the input field."""
+    def _highlight_commands(self):
+        """Applies syntax highlighting to valid slash commands."""
         self.ui.input.field.tag_remove("command_highlight", "1.0", tk.END)
         content = self.ui.input.field.get("1.0", tk.END).strip()
         if content.startswith("/"):
-            parts = content.split()
-            first = parts[0] if parts else ""
-            if any(first == cmd[0] for cmd in self.SLASH_COMMANDS):
-                self.ui.input.field.tag_add("command_highlight", "1.0", f"1.{len(first)}")
+            end_idx = content.find(" ")
+            if end_idx == -1:
+                end_idx = content.find("\n")
+
+            cmd = content[:end_idx] if end_idx != -1 else content
+            valid_cmds = [c[0] for c in self.SLASH_COMMANDS]
+
+            if cmd in valid_cmds:
+                tag_end = f"1.{end_idx}" if end_idx != -1 else "1.end"
+                self.ui.input.field.tag_add("command_highlight", "1.0", tag_end)
 
     def send_message(self):
-        """Starts processing the user input."""
-        if not self.state.assistant:
-            print("[!] Please wait, assistant is still initializing...")
+        """Validates input and initiates assistant processing."""
+        if self.state.process.is_busy:
             return
-        user_input = self.ui.input.field.get("1.0", tk.END).strip()
+
+        user_input = self.ui.input.field.get("1.0", "end-1c").strip()
         if not user_input:
             return
+
+        self.state.process.is_busy = True
         self.ui.input.field.delete("1.0", tk.END)
-        self.adjust_input_height()
-        self.display_message(user_input, "user")
-        self.ui.input.field.config(state='disabled')
-        threading.Thread(
-            target=self.process_input, args=(user_input,), daemon=True
-        ).start()
+        self._adjust_input_height()
+        self.state.msg_queue.put(("text", user_input + "\n", "user"))
+        self.process_input(user_input)
 
     def _get_assistant_msgs(self, user_input, search_context):
         """Constructs the message list for the LLM."""
@@ -491,24 +498,24 @@ class AssistantApp:
         """Handles the streaming response from the LLM."""
         try:
             full_resp = ""
-            stream = local_assistant.client.chat(
+            stream = get_ollama_client().chat(
                 model=config.MODEL_NAME, messages=msgs,
                 stream=True, options=complexity['params']
             )
             for chunk in stream:
-                if self.state.stop_generation:
+                if self.state.process.stop_generation:
                     break
                 cnt = chunk['message']['content']
                 full_resp += cnt
                 self.state.msg_queue.put(("text", cnt, "assistant"))
 
             self._finalize_chat_response(user_input, full_resp)
-        except (ollama.ResponseError, AttributeError) as exc:
-            error_print(f"Assistant Error: {exc}")
+        except (ollama.ResponseError, AttributeError, ConnectionError) as exc:
+            error_print(f"Assistant Error: {format_error_msg(exc)}")
 
     def _finalize_chat_response(self, user_input, full_resp):
         """Stores result and triggers final rendering."""
-        if self.state.stop_generation:
+        if self.state.process.stop_generation:
             self.state.msg_queue.put(("text", " [Interrupted]", "cancelled"))
             res = full_resp + " [Interrupted]"
         else:
@@ -521,7 +528,7 @@ class AssistantApp:
         ])
 
         self.state.msg_queue.put(("final_render", "", "assistant"))
-        if not self.state.stop_generation:
+        if not self.state.process.stop_generation:
             self.state.assistant.update_memory_async(user_input, full_resp)
 
         if len(self.state.assistant.messages) > 20:
@@ -529,7 +536,7 @@ class AssistantApp:
 
     def process_input(self, user_input):
         """Orchestrates complexity analysis, search, and LLM chat."""
-        self.state.stop_generation = False
+        self.state.process.stop_generation = False
         try:
             cmd_map = {
                 '/clear': self._cmd_clear, '/debug': self._cmd_debug,
@@ -549,21 +556,23 @@ class AssistantApp:
             self.state.msg_queue.put(("start_indicator", None, None))
 
             def run_assistant():
-                complexity = ComplexityScorer.analyze(user_input)
-                p_params = complexity['params']
+                try:
+                    complexity = ComplexityScorer.analyze(user_input)
+                    p_params = complexity['params']
 
-                skip_search = complexity['level'] == ComplexityScorer.LEVEL_MINIMAL
-                ctx = self.state.assistant.decide_and_search(
-                    user_input, skip_llm=skip_search, options=p_params
-                )
+                    skip_search = complexity['level'] == ComplexityScorer.LEVEL_MINIMAL
+                    ctx = self.state.assistant.decide_and_search(
+                        user_input, skip_llm=skip_search, options=p_params
+                    )
 
-                if ctx and p_params.get('num_ctx', 0) < 2048:
-                    p_params['num_ctx'] = ComplexityScorer.get_safe_context_size(2048)
+                    if ctx and p_params.get('num_ctx', 0) < 2048:
+                        p_params['num_ctx'] = ComplexityScorer.get_safe_context_size(2048)
 
-                self.state.assistant.update_system_prompt_for_user(user_input)
-                msgs = self._get_assistant_msgs(user_input, ctx)
-                self._run_streaming_chat(user_input, complexity, msgs)
-                self.state.msg_queue.put(("enable", None, None))
+                    self.state.assistant.update_system_prompt(user_input)
+                    msgs = self._get_assistant_msgs(user_input, ctx)
+                    self._run_streaming_chat(user_input, complexity, msgs)
+                finally:
+                    self.state.msg_queue.put(("enable", None, None))
 
             threading.Thread(target=run_assistant, daemon=True).start()
 
@@ -614,27 +623,39 @@ class AssistantApp:
         logger.info("Bypass command invoked: %s...", raw[:50])
         if not raw:
             self.state.msg_queue.put(("text", "Usage: /bypass <prompt>\n", "system"))
+            self.state.msg_queue.put(("enable", None, None))
         else:
             self.state.msg_queue.put(("start_indicator", None, None))
-            _, proc = ShellIntegration.run_ollama_bypass(
-                raw, self.state.msg_queue, lambda: self.state.stop_generation
-            )
-            self.state.active_process = proc
-            msg = "[Interrupted]" if self.state.stop_generation else "\n"
-            tag = "cancelled" if self.state.stop_generation else "assistant"
-            self.state.msg_queue.put(("text", msg, tag))
-            if not self.state.stop_generation:
-                self.state.msg_queue.put(("final_render", "", "assistant"))
-            self._stop_active_process()
-        self.state.msg_queue.put(("enable", None, None))
 
-    def replace_last_message(self, text, tag):
-        """Replaces the last line of text with new content."""
+            def _assign_proc(proc):
+                self.state.process.active = proc
+
+            def run_bypass():
+                try:
+                    run_ollama_bypass(
+                        raw, self.state.msg_queue,
+                        lambda: self.state.process.stop_generation,
+                        start_callback=_assign_proc
+                    )
+                    msg = "[Interrupted]" if self.state.process.stop_generation else "\n"
+                    tag = "cancelled" if self.state.process.stop_generation else "assistant"
+                    self.state.msg_queue.put(("text", msg, tag))
+                    if not self.state.process.stop_generation:
+                        self.state.msg_queue.put(("final_render", "", "assistant"))
+                    self._stop_active_process()
+                finally:
+                    self.state.msg_queue.put(("enable", None, None))
+
+            threading.Thread(target=run_bypass, daemon=True).start()
+
+    def _replace_last_message(self, text, tag):
+        """Replaces the last message in the chat."""
         self.ui.chat.display.config(state='normal')
         try:
             self.ui.chat.display.delete("end-1c linestart", "end-1c")
             self.ui.chat.display.insert("end-1c", text, tag)
-            self.ui.chat.display.see(tk.END)
+            if self.state.auto_scroll:
+                self.ui.chat.display.see(tk.END)
         except tk.TclError:
             pass
         finally:
@@ -669,11 +690,11 @@ class AssistantApp:
                         "end-1c", self.state.response.full_text, "assistant"
                     )
             if final:
-                self.finalize_message_turn()
+                self._finalize_message_turn()
         else:
             self.ui.chat.display.insert("end-1c", text, "assistant")
 
-    def display_message(self, text, tag, final=False):
+    def _display_message(self, text, tag, final=False):
         """Renders messages in the chat display with Markdown support."""
         self.ui.chat.display.config(state='normal')
         try:
@@ -687,7 +708,7 @@ class AssistantApp:
                         "end-1c", self.state.response.full_text, "assistant"
                     )
                 self.ui.chat.display.insert("end-1c", text, "cancelled")
-                self.finalize_message_turn()
+                self._finalize_message_turn()
             elif tag == "assistant":
                 self._render_assistant_stream(text, final)
             else:
@@ -703,14 +724,15 @@ class AssistantApp:
                 self.state.response.full_text = ""
                 self.state.response.last_rendered_len = 0
                 if tag == "user":
-                    self.finalize_message_turn()
+                    self._finalize_message_turn()
         except (tk.TclError, ValueError) as exc:
             self.ui.chat.display.insert("end-1c", f"\n[GUI Error: {exc}]\n", "error")
         finally:
-            self.ui.chat.display.see(tk.END)
+            if self.state.auto_scroll:
+                self.ui.chat.display.see(tk.END)
             self.ui.chat.display.config(state='disabled')
 
-    def finalize_message_turn(self):
+    def _finalize_message_turn(self):
         """Handles post-message-turn cleanup and UI elements."""
         try:
             # Only delete the trailing newline if it's strictly AFTER the assistant_msg_start mark.
@@ -718,14 +740,14 @@ class AssistantApp:
             if self.ui.chat.display.compare("end-2c", ">", "assistant_msg_start"):
                 if self.ui.chat.display.get("end-2c", "end-1c") == "\n":
                     self.ui.chat.display.delete("end-2c", "end-1c")
-            self.insert_separator(height=40)
+            self._insert_separator(height=40)
             self.ui.chat.display.mark_set("assistant_msg_start", "end-1c")
             self.state.response.full_text = ""
         except tk.TclError:
             pass
 
-    def insert_separator(self, height=25):
-        """Inserts a horizontal separator into the chat display."""
+    def _insert_separator(self, height=25):
+        """Inserts a thematic separator in the chat."""
         try:
             # Ensure separator starts on a new line
             if self.ui.chat.display.index("end-1c") != "1.0":
@@ -753,8 +775,8 @@ class AssistantApp:
         except tk.TclError:
             self.ui.chat.display.insert("end-1c", "-"*20 + "\n")
 
-    def handle_tooltip(self, _, url):
-        """Displays a tooltip for links in the chat area."""
+    def _handle_tooltip(self, _, url):
+        """Displays a tooltip for links."""
         if not url:
             if self.ui.tooltip_window:
                 try:
@@ -777,7 +799,7 @@ class AssistantApp:
         except tk.TclError:
             self.ui.tooltip_window = None
 
-    def check_queue(self):
+    def _check_queue(self):
         """Polls the message queue for UI updates."""
         try:
             while not self.state.msg_queue.empty():
@@ -788,61 +810,66 @@ class AssistantApp:
         except (tk.TclError, ValueError) as exc:
             debug_print(f"Error processing queue: {exc}")
         finally:
-            self.root.after(30, self.check_queue)
+            self.root.after(30, self._check_queue)
 
     def _dispatch_queue_action(self, action, content, tag):
         """Dispatcher for UI actions from the message queue."""
         if action == "text":
             if tag == "cancelled":
                 self.state.indicator.active = False
-            self.display_message(content, tag)
+            self._display_message(content, tag)
         elif action == "start_indicator":
             self._start_indicator()
         elif action == "replace_last":
-            self.replace_last_message(content, tag)
+            self._replace_last_message(content, tag)
         elif action == "clear":
             self.ui.chat.display.config(state='normal')
             self.ui.chat.display.delete("1.0", tk.END)
             self.ui.chat.display.config(state='disabled')
-            self.display_message("Type /help for commands.\n\n", "system")
+            self._display_message("Type /help for commands.\n\n", "system")
         elif action == "separator":
             self.ui.chat.display.config(state='normal')
-            self.insert_separator(height=40)
+            self._insert_separator(height=40)
             self.ui.chat.display.config(state='disabled')
         elif action == "final_render":
             self.state.indicator.active = False
-            self.display_message("", tag, final=True)
-            self.update_info_display()
+            self._display_message("", tag, final=True)
+            self._update_info_display()
         elif action == "toggle_info":
             self.state.show_info = self.ui.info_panel.toggle()
             self.settings.set("show_info", self.state.show_info)
-            self.update_info_display()
+            self._update_info_display()
         elif action == "update_info_ui":
             self.ui.info_panel.update_stats(content)
         elif action == "enable":
-            self.ui.input.field.config(state='normal')
+            self.state.process.is_busy = False
             self.ui.input.field.focus_set()
+            self._adjust_input_height()
         elif action == "quit":
             self.root.quit()
 
-    def update_info_display(self):
+    def _update_info_display(self):
         """Fetches and displays model info in the info panel."""
         if not self.state.show_info or not self.state.assistant:
             return
-        threading.Thread(
-            target=lambda: self.state.msg_queue.put(
-                ("update_info_ui", self.state.assistant.get_model_info(), None)
-            ),
-            daemon=True
-        ).start()
 
-    def cancel_generation(self, _=None):
+        def _fetch():
+            try:
+                info = self.state.assistant.get_model_info()
+                self.state.msg_queue.put(("update_info_ui", info, None))
+            except ConnectionError:
+                # Silently ignore connection errors during background stats refresh
+                pass
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _cancel_generation(self, _=None):
         """Cancels any ongoing model generation."""
-        if self.ui.input.field['state'] == 'disabled':
-            self.state.stop_generation = True
+        if self.state.process.is_busy:
+            self.state.process.stop_generation = True
             self._stop_active_process()
 
-    def on_close(self):
+    def _on_close(self):
         """Handles application shutdown."""
         self._stop_active_process()
         self.root.destroy()

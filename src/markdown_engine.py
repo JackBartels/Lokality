@@ -5,7 +5,7 @@ Converts Markdown tokens into Tkinter text widget elements.
 import tkinter as tk
 import webbrowser
 from utils import debug_print
-from theme import Theme
+import theme as Theme
 
 class MarkdownEngine:
     """

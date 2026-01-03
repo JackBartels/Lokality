@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import traceback
 
 import psutil
 import ollama
@@ -14,8 +15,44 @@ import ollama
 import config
 from logger import logger
 
+def thread_excepthook(args):
+    """Global hook for catching uncaught exceptions in threads."""
+    err_msg = (
+        f"Thread Error ({args.thread.name}): "
+        f"{args.exc_type.__name__}: {args.exc_value}"
+    )
+    error_print(err_msg)
+    if config.DEBUG:
+        traceback.print_exception(
+            args.exc_type, args.exc_value, args.exc_traceback
+        )
+
 # ANSI escape code stripper
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\-_]| \[0-?]*[ -/]*[@-~])')
+
+class OllamaClientManager:
+    """Manages a singleton Ollama client instance."""
+    _instance = None
+
+    @classmethod
+    def get_client(cls):
+        """Returns the shared Ollama client."""
+        if cls._instance is None:
+            cls._instance = ollama.Client()
+        return cls._instance
+
+    @classmethod
+    def reset_client(cls):
+        """Resets the shared Ollama client instance."""
+        cls._instance = None
+
+def get_ollama_client():
+    """Returns a shared Ollama client instance, initializing it on first call."""
+    return OllamaClientManager.get_client()
+
+def reset_ollama_client():
+    """Resets the shared Ollama client (primarily for testing)."""
+    OllamaClientManager.reset_client()
 
 def strip_ansi(text):
     """Removes ANSI escape sequences from text."""
@@ -152,7 +189,7 @@ def verify_env_health():
     logger.info("[*] Performing environment health checks...")
 
     try:
-        ollama.Client().list()
+        get_ollama_client().list()
     except (ollama.ResponseError, RuntimeError, ConnectionError) as exc:
         errors.append(format_error_msg(exc))
 

@@ -10,7 +10,7 @@ from typing import Dict, Any
 import ollama
 
 import config
-from utils import get_system_resources, debug_print
+from utils import get_system_resources, debug_print, get_ollama_client
 
 class ComplexityScorer:
     """
@@ -68,8 +68,7 @@ class ComplexityScorer:
             return ComplexityScorer._model_context_cache[model_name]
 
         try:
-            client = ollama.Client()
-            info = client.show(model_name).model_dump()
+            info = get_ollama_client().show(model_name).model_dump()
             model_info = info.get('modelinfo', {})
             for key, val in model_info.items():
                 if 'context_length' in key:
@@ -87,8 +86,7 @@ class ComplexityScorer:
             return ComplexityScorer._model_size_cache["size"]
 
         try:
-            client = ollama.Client()
-            ps = client.ps()
+            ps = get_ollama_client().ps()
             # ps is a list of models or a structure with 'models' attribute
             models_list = getattr(ps, 'models', ps)
             for m in models_list:

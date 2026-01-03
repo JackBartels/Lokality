@@ -20,10 +20,13 @@ from logger import logger
 from memory import MemoryStore
 from memory_manager import MemoryManager
 from search_engine import SearchEngine
-from stats_collector import StatsCollector
-from utils import debug_print, error_print, info_print, get_system_resources
+from stats_collector import get_model_info
+from utils import (
+    debug_print, error_print, info_print, get_system_resources,
+    get_ollama_client
+)
 
-client = ollama.Client()
+# client removed from here
 
 SYSTEM_PROMPT_TEMPLATE = (
     "You are Lokality, a helpful, friendly, and professional AI assistant. "
@@ -55,7 +58,6 @@ class LocalChatAssistant:
         self.messages = []
         self.memory = MemoryStore()
         self.system_prompt = ""
-        self.stop_requested = False
         self._cached_prompt = None
         self._session_search_cache = {}
 
@@ -68,9 +70,9 @@ class LocalChatAssistant:
         def _warmup():
             try:
                 debug_print(f"[*] Waking Ollama model: {config.MODEL_NAME}...")
-                client.generate(model=config.MODEL_NAME, prompt="", keep_alive="10m")
+                get_ollama_client().generate(model=config.MODEL_NAME, prompt="", keep_alive="10m")
                 debug_print(f"[*] Model {config.MODEL_NAME} is awake.")
-            except (ollama.ResponseError, AttributeError) as exc:
+            except (ollama.ResponseError, AttributeError, ConnectionError) as exc:
                 debug_print(f"[*] Failed to wake model: {exc}")
 
         threading.Thread(target=_warmup, name="ModelWaker", daemon=True).start()
@@ -80,7 +82,7 @@ class LocalChatAssistant:
         current_digest = ""
         last_percent = -1
 
-        for progress in client.pull(selected_model, stream=True):
+        for progress in get_ollama_client().pull(selected_model, stream=True):
             status = progress.get('status')
             if status == 'downloading':
                 digest = progress.get('digest', '')
@@ -110,7 +112,7 @@ class LocalChatAssistant:
     def _ensure_model_available(self):
         """Pulls a suitable default model if none are found."""
         try:
-            models = client.list().get('models', [])
+            models = get_ollama_client().list().get('models', [])
             if models:
                 return
 
@@ -135,7 +137,7 @@ class LocalChatAssistant:
 
             config.MODEL_NAME = selected_model
 
-        except (ollama.ResponseError, AttributeError) as exc:
+        except (ollama.ResponseError, AttributeError, ConnectionError) as exc:
             error_print(f"Model initialization failed: {exc}")
 
     def update_system_prompt(self, query=None):
@@ -154,10 +156,6 @@ class LocalChatAssistant:
         )
         if query is None:
             self._cached_prompt = self.system_prompt
-
-    def update_system_prompt_for_user(self, query):
-        """Public method to trigger a system prompt refresh for a query."""
-        self.update_system_prompt(query)
 
     def update_memory_async(self, user_input, assistant_response):
         """Dispatches memory update to a background thread."""
@@ -262,7 +260,7 @@ class LocalChatAssistant:
                 ComplexityScorer.get_safe_context_size(CONTEXT_WINDOW_SIZE)
             )
         }
-        res = client.generate(
+        res = get_ollama_client().generate(
             model=config.MODEL_NAME, prompt=decision_prompt,
             format="json", options=gen_options
         )
@@ -281,7 +279,7 @@ class LocalChatAssistant:
         )
         scrape_ctx = ComplexityScorer.get_safe_context_size(4096)
         debug_print("[*] Scrape Decision: Prompting model...")
-        scrape_res = client.generate(
+        scrape_res = get_ollama_client().generate(
             model=config.MODEL_NAME, prompt=scrape_prompt, format="json",
             options={
                 "num_predict": SEARCH_DECISION_MAX_TOKENS,
@@ -304,7 +302,7 @@ class LocalChatAssistant:
             "TASK: Extract ONLY the facts that help answer 'WHY WE SEARCHED'."
         )
         distill_ctx = ComplexityScorer.get_safe_context_size(4096)
-        distill_res = client.generate(
+        distill_res = get_ollama_client().generate(
             model=config.MODEL_NAME, prompt=distill_prompt,
             options={
                 "num_predict": 500, "temperature": 0.0,
@@ -324,27 +322,35 @@ class LocalChatAssistant:
         try:
             data = self._get_search_decision(user_input, options or {})
             if data and data.get("action") == "search":
-                query = data.get("query", "").strip() or user_input
-                if query in self._session_search_cache:
-                    debug_print(f"[*] Search Cache Hit: {query}")
-                    return self._session_search_cache[query]
-
-                results = SearchEngine.web_search(query)
-                recent_context = "\n".join(
-                    [f"{m['role']}: {m['content'][:150]}" for m in self.messages[-2:]]
-                )
-                try:
-                    extra = self._handle_scraping(user_input, results, recent_context)
-                    results += extra
-                except (ollama.ResponseError, json.JSONDecodeError):
-                    pass
-
-                full_res = f"--- Search for '{query}' ---\n{results}"
-                self._session_search_cache[query] = full_res
-                return full_res
+                return self._perform_search(user_input, data)
         except (ollama.ResponseError, json.JSONDecodeError, AttributeError) as exc:
             logger.error("Search Decision Error: %s", exc)
         return None
+
+    def _perform_search(self, user_input, data):
+        """Executes the search and optional scraping."""
+        base_query = data.get("query", "").strip() or user_input
+        # Append today's date to the search query for better relevance
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        query = f"{base_query} {date_str}"
+
+        if query in self._session_search_cache:
+            debug_print(f"[*] Search Cache Hit: {query}")
+            return self._session_search_cache[query]
+
+        results = SearchEngine.web_search(query)
+        recent_context = "\n".join(
+            [f"{m['role']}: {m['content'][:150]}" for m in self.messages[-2:]]
+        )
+        try:
+            extra = self._handle_scraping(user_input, results, recent_context)
+            results += extra
+        except (ollama.ResponseError, json.JSONDecodeError):
+            pass
+
+        full_res = f"--- Search for '{query}' ---\n{results}"
+        self._session_search_cache[query] = full_res
+        return full_res
 
     def clear_long_term_memory(self):
         """Resets the internal long-term memory."""
@@ -354,6 +360,6 @@ class LocalChatAssistant:
 
     def get_model_info(self):
         """Returns current model and system usage stats."""
-        return StatsCollector.get_model_info(
+        return get_model_info(
             self.memory, self.system_prompt, self.messages
         )

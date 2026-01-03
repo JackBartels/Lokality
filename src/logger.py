@@ -12,23 +12,38 @@ import config
 def cleanup_logs(log_dir):
     """
     Removes logs older than MAX_LOG_AGE_DAYS if there are more than 
-    MIN_LOGS_FOR_CLEANUP files.
+    MIN_LOGS_FOR_CLEANUP files. Also caps total log files at MAX_LOG_FILES.
     """
     log_files = glob.glob(os.path.join(log_dir, "*.txt"))
-    if len(log_files) <= config.MIN_LOGS_FOR_CLEANUP:
+    if not log_files:
         return
 
-    now = datetime.datetime.now()
-    cutoff = now - datetime.timedelta(days=config.MAX_LOG_AGE_DAYS)
+    # 1. Remove logs older than MAX_LOG_AGE_DAYS
+    if len(log_files) > config.MIN_LOGS_FOR_CLEANUP:
+        now = datetime.datetime.now()
+        cutoff = now - datetime.timedelta(days=config.MAX_LOG_AGE_DAYS)
 
-    for f in log_files:
-        try:
-            mtime = datetime.datetime.fromtimestamp(os.path.getmtime(f))
-            if mtime < cutoff:
-                os.remove(f)
-        except OSError:
-            # Silently fail if we can't delete a file (e.g. it's open)
-            pass
+        for f in log_files:
+            try:
+                mtime = datetime.datetime.fromtimestamp(os.path.getmtime(f))
+                if mtime < cutoff:
+                    os.remove(f)
+            except OSError:
+                # Silently fail if we can't delete a file (e.g. it's open)
+                pass
+
+    # 2. Enforce MAX_LOG_FILES limit
+    log_files = glob.glob(os.path.join(log_dir, "*.txt"))
+    if len(log_files) > config.MAX_LOG_FILES:
+        # Sort by modification time (oldest first)
+        log_files.sort(key=os.path.getmtime)
+        files_to_remove = len(log_files) - config.MAX_LOG_FILES
+
+        for i in range(files_to_remove):
+            try:
+                os.remove(log_files[i])
+            except OSError:
+                pass
 
 def get_logger(name="lokality"):
     """

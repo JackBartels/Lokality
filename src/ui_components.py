@@ -123,6 +123,8 @@ class InfoPanel(tk.Frame):
         self.show_info = not self.show_info
         if self.show_info:
             self.grid()
+            self.update_idletasks()
+            self.after(50, self._perform_layout)
         else:
             self.grid_remove()
         return self.show_info
@@ -145,13 +147,19 @@ class InfoPanel(tk.Frame):
             self.labels[i][1].config(text=name)
             self.labels[i][2].config(text=val)
             self.labels[i][3].config(text=unit)
+        self.update_idletasks()
         self._perform_layout()
 
     def _perform_layout(self):
         """Recalculates the position of labels based on available width."""
         width = self.winfo_width()
         if width < 100:
-            return
+            # Fallback to parent width or default to ensure we set a height
+            # and trigger visibility/geometry updates.
+            width = self.master.winfo_width()
+            if width < 100:
+                width = 600 # Safe default
+
         max_w = width - 40
         rows, cur_w = [[]], 0
         for container, _, _, _ in self.labels:
@@ -177,11 +185,12 @@ class InfoPanel(tk.Frame):
         total_h = max(40, y_pos + 10)
         if abs(self.ui.canvas.winfo_height() - total_h) > 5:
             self.ui.canvas.config(height=total_h)
+            self.update_idletasks()
         self.ui.canvas.delete(self.ui.bg_id)
         self.ui.bg_id = round_rectangle(
-            self.ui.canvas, (4, 4, width-4, self.ui.canvas.winfo_height()-4),
+            self.ui.canvas, (4, 4, width-4, total_h-4),
             radius=15, fill=self.theme.BG_COLOR
         )
         self.ui.canvas.tag_lower(self.ui.bg_id)
         self.ui.canvas.itemconfig(self.ui.window_id, width=max_w, height=y_pos)
-        self.ui.canvas.coords(self.ui.window_id, 20, (self.ui.canvas.winfo_height() - y_pos) / 2)
+        self.ui.canvas.coords(self.ui.window_id, 20, (total_h - y_pos) / 2)

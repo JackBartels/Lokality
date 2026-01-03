@@ -3,46 +3,18 @@ Unit tests for the LocalChatAssistant class.
 """
 import json
 import unittest
-from datetime import datetime
 from unittest.mock import patch
 from memory import MemoryStore
 from local_assistant import LocalChatAssistant
+from tests.base_test import BaseAssistantTest
 
-class TestLocalChatAssistant(unittest.TestCase):
+class TestLocalChatAssistant(BaseAssistantTest):
     """Test suite for LocalChatAssistant."""
 
     def setUp(self):
         """Set up test environment."""
-        self.patchers = {}
-        self.mocks = {}
-
-        # MemoryStore patch
-        self.patchers['memory'] = patch('local_assistant.MemoryStore')
-        self.mocks['memory_class'] = self.patchers['memory'].start()
-        self.mocks['memory_instance'] = self.mocks['memory_class'].return_value
-        self.mocks['memory_instance'].get_relevant_facts.return_value = []
-
-        # client patch
-        self.patchers['client'] = patch('local_assistant.client')
-        self.mocks['client'] = self.patchers['client'].start()
-
-        # ComplexityScorer patch
-        self.patchers['ctx'] = patch('local_assistant.ComplexityScorer.get_safe_context_size')
-        self.mocks['ctx'] = self.patchers['ctx'].start()
-        self.mocks['ctx'].return_value = 2048
-
-        # Mock datetime for determinism
-        self.patchers['datetime'] = patch('local_assistant.datetime')
-        self.mocks['datetime'] = self.patchers['datetime'].start()
-        self.mocks['datetime'].now.return_value = datetime(2025, 12, 27, 10, 30)
-        self.mocks['datetime'].strftime = datetime.strftime
-
+        super().setUp()
         self.assistant = LocalChatAssistant()
-
-    def tearDown(self):
-        """Clean up test environment."""
-        for patcher in self.patchers.values():
-            patcher.stop()
 
     def test_update_system_prompt(self):
         """Test that system prompt is updated with relevant facts and time."""
@@ -69,10 +41,10 @@ class TestLocalChatAssistant(unittest.TestCase):
         result = self.assistant.decide_and_search("What is the weather?")
 
         self.assertIn("It is sunny.", result)
-        self.assertIn("--- Search for 'What is the weather?' ---", result)
+        self.assertIn("--- Search for 'What is the weather? 2025-12-27' ---", result)
         # Verify call while ignoring potential warmup calls in background
         calls = [
-            c for c in mock_web_search.call_args_list if "What is the weather?" in str(c)
+            c for c in mock_web_search.call_args_list if "What is the weather? 2025-12-27" in str(c)
         ]
         self.assertTrue(len(calls) > 0)
 
@@ -109,7 +81,7 @@ class TestLocalChatAssistant(unittest.TestCase):
         result = self.assistant.decide_and_search("What is the weather in London?")
 
         self.assertIn("Relevant: It is 20°C and sunny in London.", result)
-        self.assertIn("--- Search for 'What is the weather in London?' ---", result)
+        self.assertIn("--- Search for 'What is the weather in London? 2025-12-27' ---", result)
         mock_scrape.assert_called_once_with("https://weather.com/london")
 
     def test_accuracy_context_incorporation(self):

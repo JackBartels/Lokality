@@ -27,6 +27,7 @@ DEBUG = os.environ.get("DEBUG", "0") == "1"
 LOG_DIR = "logs"
 MAX_LOG_AGE_DAYS = 30
 MIN_LOGS_FOR_CLEANUP = 10
+MAX_LOG_FILES = 100
 
 # UI Indicator
 INDICATOR_CHARS = ["ʘ", "Ο"]

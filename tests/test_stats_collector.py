@@ -4,14 +4,15 @@ Unit tests for the StatsCollector class.
 import unittest
 from unittest.mock import MagicMock, patch
 import ollama
-from stats_collector import StatsCollector
+from stats_collector import get_model_info
 
 class TestStatsCollector(unittest.TestCase):
     """Test suite for StatsCollector."""
 
-    @patch('stats_collector.client')
-    def test_get_model_info(self, mock_client):
+    @patch('stats_collector.get_ollama_client')
+    def test_get_model_info(self, mock_get_client):
         """Test retrieving model info from Ollama."""
+        mock_client = mock_get_client.return_value
         # Mock memory store
         mock_memory = MagicMock()
         mock_memory.get_fact_count.return_value = 10
@@ -37,7 +38,7 @@ class TestStatsCollector(unittest.TestCase):
 
         # Change config.MODEL_NAME for test
         with patch('stats_collector.MODEL_NAME', 'llama3'):
-            stats = StatsCollector.get_model_info(
+            stats = get_model_info(
                 mock_memory, "System prompt", [{"content": "User message"}]
             )
 
@@ -47,9 +48,10 @@ class TestStatsCollector(unittest.TestCase):
             self.assertEqual(stats['ram_mb'], 1000)
             self.assertGreater(stats['context_pct'], 0)
 
-    @patch('stats_collector.client')
-    def test_get_model_info_error(self, mock_client):
+    @patch('stats_collector.get_ollama_client')
+    def test_get_model_info_error(self, mock_get_client):
         """Test handling of Ollama errors."""
+        mock_client = mock_get_client.return_value
         # Simulate an error in ollama client
         mock_client.ps.side_effect = ollama.ResponseError("Ollama offline")
 
@@ -58,7 +60,7 @@ class TestStatsCollector(unittest.TestCase):
 
         # We need to catch the exception or verify default behavior
         # StatsCollector should handle the exception and return default stats
-        stats = StatsCollector.get_model_info(mock_memory, "prompt", [])
+        stats = get_model_info(mock_memory, "prompt", [])
 
         # Should still return default stats and not crash
         self.assertEqual(stats['memory_entries'], 5)
