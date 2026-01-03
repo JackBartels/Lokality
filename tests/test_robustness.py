@@ -69,11 +69,5 @@ class TestRobustness(unittest.TestCase):
                 if os.path.exists(db_path + ext):
                     os.remove(db_path + ext)
 
-    def test_markdown_rendering_safety(self):
-        """Test markdown rendering safety (placeholder)."""
-        # We can't easily test the Tkinter UI here without a display,
-        # but we can verify the logic in app.py would handle it.
-        # This is more of a manual verification of the code changes in app.py.
-
 if __name__ == "__main__":
     unittest.main()

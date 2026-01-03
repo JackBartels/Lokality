@@ -20,6 +20,7 @@ class ComplexityScorer:
 
     _model_context_cache = {}
     _model_size_cache = {"size": 0, "expires": 0}
+    _client = ollama.Client()
 
     # Complexity Levels
     LEVEL_MINIMAL = "MINIMAL"
@@ -68,8 +69,7 @@ class ComplexityScorer:
             return ComplexityScorer._model_context_cache[model_name]
 
         try:
-            client = ollama.Client()
-            info = client.show(model_name).model_dump()
+            info = ComplexityScorer._client.show(model_name).model_dump()
             model_info = info.get('modelinfo', {})
             for key, val in model_info.items():
                 if 'context_length' in key:
@@ -87,8 +87,7 @@ class ComplexityScorer:
             return ComplexityScorer._model_size_cache["size"]
 
         try:
-            client = ollama.Client()
-            ps = client.ps()
+            ps = ComplexityScorer._client.ps()
             # ps is a list of models or a structure with 'models' attribute
             models_list = getattr(ps, 'models', ps)
             for m in models_list:

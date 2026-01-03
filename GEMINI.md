@@ -85,6 +85,7 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 - **Modular Design**: UI, Search, Stats, and Memory logic are strictly separated.
 - **Non-Blocking**: Heavy operations (LLM extraction, web search, stats gathering) run in background threads.
 - **Selective Learning**: The assistant is extractive and strict, focusing on permanent user attributes and identity facts.
+- **Prompt Stability**: Model prompts and instructions should never be modified as part of refactors, except for formatting changes.
 - **Code Quality**: Strict adherence to Pylint standards. A perfect **10.00/10** score is required. Disabling Pylint warnings via comments (e.g., `# pylint: disable=...`) is **STRICTLY FORBIDDEN**. Code must be refactored to comply with rules and best practices.
 - **Testing**: All changes must be verified with the test suite: `PYTHONPATH=src .venv/bin/python -m unittest discover tests`.
 - **GitHub Interaction**: Always use `gh` commands when interacting with GitHub (PRs, issues, repository metadata, etc.).

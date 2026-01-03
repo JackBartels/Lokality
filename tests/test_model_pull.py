@@ -5,58 +5,49 @@ import unittest
 from unittest.mock import patch, mock_open
 import local_assistant
 import utils
+from tests.base_test import BaseAssistantTest
 
-class TestModelPull(unittest.TestCase):
+class TestModelPull(BaseAssistantTest):
     """Test suite for model pulling logic."""
 
     def setUp(self):
-        self.memory_patcher = patch('local_assistant.MemoryStore')
-        self.mock_memory = self.memory_patcher.start()
-
-        self.client_patcher = patch('local_assistant.client')
-        self.mock_client = self.client_patcher.start()
-
+        super().setUp()
         # We will mock resources per test or keep generic patch
-        self.resources_patcher = patch('local_assistant.get_system_resources')
-        self.mock_resources = self.resources_patcher.start()
-
-    def tearDown(self):
-        self.memory_patcher.stop()
-        self.client_patcher.stop()
-        self.resources_patcher.stop()
+        self.patchers['resources'] = patch('local_assistant.get_system_resources')
+        self.mocks['resources'] = self.patchers['resources'].start()
 
     def test_init_with_existing_models(self):
         """Test initialization when models already exist."""
-        self.mock_client.list.return_value = {'models': ['some-model']}
+        self.mocks['client'].list.return_value = {'models': ['some-model']}
         local_assistant.LocalChatAssistant()
-        self.mock_client.pull.assert_not_called()
+        self.mocks['client'].pull.assert_not_called()
 
     def test_init_no_models_pulls_best_fit(self):
         """Test that the best fitting model is pulled if none exist."""
-        self.mock_client.list.return_value = {'models': []}
-        self.mock_resources.return_value = (16384, 8192) # 16GB RAM, 8GB VRAM
-        self.mock_client.pull.return_value = [{'status': 'success'}]
+        self.mocks['client'].list.return_value = {'models': []}
+        self.mocks['resources'].return_value = (16384, 8192) # 16GB RAM, 8GB VRAM
+        self.mocks['client'].pull.return_value = [{'status': 'success'}]
 
         local_assistant.LocalChatAssistant()
         expected_model = "gemma3:4b-it-qat"
-        self.mock_client.pull.assert_called_with(expected_model, stream=True)
+        self.mocks['client'].pull.assert_called_with(expected_model, stream=True)
 
     def test_init_insufficient_vram_pulls_nothing(self):
         """Test that nothing is pulled if VRAM is insufficient."""
-        self.mock_client.list.return_value = {'models': []}
-        self.mock_resources.return_value = (16384, 512)
+        self.mocks['client'].list.return_value = {'models': []}
+        self.mocks['resources'].return_value = (16384, 512)
         local_assistant.LocalChatAssistant()
-        self.mock_client.pull.assert_not_called()
+        self.mocks['client'].pull.assert_not_called()
 
     def test_init_mixed_resources_picks_correct_size(self):
         """Test model selection with mixed resources."""
-        self.mock_client.list.return_value = {'models': []}
-        self.mock_resources.return_value = (65536, 1536)
-        self.mock_client.pull.return_value = [{'status': 'success'}]
+        self.mocks['client'].list.return_value = {'models': []}
+        self.mocks['resources'].return_value = (65536, 1536)
+        self.mocks['client'].pull.return_value = [{'status': 'success'}]
 
         local_assistant.LocalChatAssistant()
         expected_model = "gemma3:270m"
-        self.mock_client.pull.assert_called_with(expected_model, stream=True)
+        self.mocks['client'].pull.assert_called_with(expected_model, stream=True)
 
 class TestIntelSupport(unittest.TestCase):
     """Test suite for Intel GPU detection."""

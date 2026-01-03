@@ -4,7 +4,7 @@ Unit tests for the StatsCollector class.
 import unittest
 from unittest.mock import MagicMock, patch
 import ollama
-from stats_collector import StatsCollector
+from stats_collector import get_model_info
 
 class TestStatsCollector(unittest.TestCase):
     """Test suite for StatsCollector."""
@@ -37,7 +37,7 @@ class TestStatsCollector(unittest.TestCase):
 
         # Change config.MODEL_NAME for test
         with patch('stats_collector.MODEL_NAME', 'llama3'):
-            stats = StatsCollector.get_model_info(
+            stats = get_model_info(
                 mock_memory, "System prompt", [{"content": "User message"}]
             )
 
@@ -58,7 +58,7 @@ class TestStatsCollector(unittest.TestCase):
 
         # We need to catch the exception or verify default behavior
         # StatsCollector should handle the exception and return default stats
-        stats = StatsCollector.get_model_info(mock_memory, "prompt", [])
+        stats = get_model_info(mock_memory, "prompt", [])
 
         # Should still return default stats and not crash
         self.assertEqual(stats['memory_entries'], 5)

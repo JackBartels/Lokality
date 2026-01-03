@@ -3,39 +3,26 @@ Unit tests for factuality and search triggering logic.
 """
 import json
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 from local_assistant import LocalChatAssistant
+from tests.base_test import BaseAssistantTest
 
-class TestFactuality(unittest.TestCase):
+class TestFactuality(BaseAssistantTest):
     """Test suite for factuality checks."""
 
     def setUp(self):
-        # We need to patch MemoryStore before LocalChatAssistant is instantiated
-        self.memory_patcher = patch('local_assistant.MemoryStore')
-        self.mock_memory = self.memory_patcher.start().return_value
-        self.mock_memory.get_relevant_facts.return_value = []
-
-        self.client_patcher = patch('local_assistant.client')
-        self.mock_client = self.client_patcher.start()
-
-        self.ctx_patcher = patch('local_assistant.ComplexityScorer.get_safe_context_size')
-        self.mock_ctx = self.ctx_patcher.start()
-        self.mock_ctx.return_value = 2048
-
+        super().setUp()
+        self.set_mock_date(datetime(2026, 1, 2, 12, 0))
         # Now instantiate
         self.assistant = LocalChatAssistant()
         self.assistant.messages = []
-
-    def tearDown(self):
-        self.memory_patcher.stop()
-        self.client_patcher.stop()
-        self.ctx_patcher.stop()
 
     @patch('local_assistant.SearchEngine.web_search')
     def test_search_triggered_for_factual_query(self, mock_search):
         """Test that search is triggered for factual queries."""
         # Mock LLM decision to search
-        self.mock_client.generate.return_value = {
+        self.mocks['client'].generate.return_value = {
             'response': json.dumps({"action": "search", "query": "price of gold"})
         }
         mock_search.return_value = "Gold is $2000"
@@ -44,12 +31,12 @@ class TestFactuality(unittest.TestCase):
 
         self.assertIn("Gold is $2000", res)
         # Verify call
-        mock_search.assert_called_once_with("price of gold")
+        mock_search.assert_called_once_with("price of gold 2026-01-02")
 
     @patch('local_assistant.SearchEngine.web_search')
     def test_search_not_triggered_for_greeting(self, mock_search):
         """Test that search is not triggered for greetings."""
-        self.mock_client.generate.return_value = {'response': '{"action": "done"}'}
+        self.mocks['client'].generate.return_value = {'response': '{"action": "done"}'}
 
         res = self.assistant.decide_and_search("Hello, how are you?")
 
@@ -59,7 +46,7 @@ class TestFactuality(unittest.TestCase):
     @patch('local_assistant.SearchEngine.web_search')
     def test_search_not_triggered_for_common_knowledge(self, mock_search):
         """Test that search is not triggered for common knowledge."""
-        self.mock_client.generate.return_value = {'response': '{"action": "done"}'}
+        self.mocks['client'].generate.return_value = {'response': '{"action": "done"}'}
 
         res = self.assistant.decide_and_search("What is the freezing point of water?")
 
@@ -73,7 +60,7 @@ class TestFactuality(unittest.TestCase):
         self.assertIsNone(res)
         # Filter out warmup calls
         search_calls = [
-            c for c in self.mock_client.generate.call_args_list
+            c for c in self.mocks['client'].generate.call_args_list
             if c.kwargs.get('prompt') != ""
         ]
         self.assertEqual(len(search_calls), 0)

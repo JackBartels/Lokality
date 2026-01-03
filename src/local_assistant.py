@@ -20,7 +20,7 @@ from logger import logger
 from memory import MemoryStore
 from memory_manager import MemoryManager
 from search_engine import SearchEngine
-from stats_collector import StatsCollector
+from stats_collector import get_model_info
 from utils import debug_print, error_print, info_print, get_system_resources
 
 client = ollama.Client()
@@ -55,7 +55,6 @@ class LocalChatAssistant:
         self.messages = []
         self.memory = MemoryStore()
         self.system_prompt = ""
-        self.stop_requested = False
         self._cached_prompt = None
         self._session_search_cache = {}
 
@@ -154,10 +153,6 @@ class LocalChatAssistant:
         )
         if query is None:
             self._cached_prompt = self.system_prompt
-
-    def update_system_prompt_for_user(self, query):
-        """Public method to trigger a system prompt refresh for a query."""
-        self.update_system_prompt(query)
 
     def update_memory_async(self, user_input, assistant_response):
         """Dispatches memory update to a background thread."""
@@ -324,27 +319,35 @@ class LocalChatAssistant:
         try:
             data = self._get_search_decision(user_input, options or {})
             if data and data.get("action") == "search":
-                query = data.get("query", "").strip() or user_input
-                if query in self._session_search_cache:
-                    debug_print(f"[*] Search Cache Hit: {query}")
-                    return self._session_search_cache[query]
-
-                results = SearchEngine.web_search(query)
-                recent_context = "\n".join(
-                    [f"{m['role']}: {m['content'][:150]}" for m in self.messages[-2:]]
-                )
-                try:
-                    extra = self._handle_scraping(user_input, results, recent_context)
-                    results += extra
-                except (ollama.ResponseError, json.JSONDecodeError):
-                    pass
-
-                full_res = f"--- Search for '{query}' ---\n{results}"
-                self._session_search_cache[query] = full_res
-                return full_res
+                return self._perform_search(user_input, data)
         except (ollama.ResponseError, json.JSONDecodeError, AttributeError) as exc:
             logger.error("Search Decision Error: %s", exc)
         return None
+
+    def _perform_search(self, user_input, data):
+        """Executes the search and optional scraping."""
+        base_query = data.get("query", "").strip() or user_input
+        # Append today's date to the search query for better relevance
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        query = f"{base_query} {date_str}"
+
+        if query in self._session_search_cache:
+            debug_print(f"[*] Search Cache Hit: {query}")
+            return self._session_search_cache[query]
+
+        results = SearchEngine.web_search(query)
+        recent_context = "\n".join(
+            [f"{m['role']}: {m['content'][:150]}" for m in self.messages[-2:]]
+        )
+        try:
+            extra = self._handle_scraping(user_input, results, recent_context)
+            results += extra
+        except (ollama.ResponseError, json.JSONDecodeError):
+            pass
+
+        full_res = f"--- Search for '{query}' ---\n{results}"
+        self._session_search_cache[query] = full_res
+        return full_res
 
     def clear_long_term_memory(self):
         """Resets the internal long-term memory."""
@@ -354,6 +357,6 @@ class LocalChatAssistant:
 
     def get_model_info(self):
         """Returns current model and system usage stats."""
-        return StatsCollector.get_model_info(
+        return get_model_info(
             self.memory, self.system_prompt, self.messages
         )

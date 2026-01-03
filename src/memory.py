@@ -233,23 +233,6 @@ class MemoryStore:
         return unique[:20]
 
     @retry_on_busy()
-    def is_name_fact(self, fact_id):
-        """Efficiently checks if a fact ID refers to a name or nickname."""
-        try:
-            conn = self._get_conn()
-            with self._lock:
-                cursor = conn.execute(
-                    "SELECT fact FROM memory WHERE id = ?", (fact_id,)
-                )
-                row = cursor.fetchone()
-                if row:
-                    fact_lower = row['fact'].lower()
-                    return "name" in fact_lower or "nickname" in fact_lower
-        except sqlite3.Error as exc:
-            debug_print(f"[*] Memory: Error checking name fact: {exc}")
-        return False
-
-    @retry_on_busy()
     def add_fact(self, entity, fact):
         """Adds a new fact to the memory."""
         try:
