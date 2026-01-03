@@ -2,7 +2,7 @@
 Unit tests for application commands.
 """
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import config
 from app import AssistantApp
 
@@ -98,6 +98,31 @@ class TestCommands(unittest.TestCase):
         while not self.app.state.msg_queue.empty():
             queue_actions.append(self.app.state.msg_queue.get()[0])
         self.assertIn("toggle_info", queue_actions)
+
+    @patch('app.run_ollama_bypass')
+    @patch('app.threading.Thread')
+    def test_command_bypass_logic(self, mock_thread, mock_bypass):
+        """Test the /bypass command."""
+        # Mock Thread to run target immediately
+        mock_thread.side_effect = lambda target, **_kwargs: MagicMock(start=target)
+
+        # Mock bypass return
+        mock_bypass.return_value = ("COMPLETED", MagicMock())
+
+        self.app.process_input("/bypass hi")
+
+        # Verify bypass was called
+        mock_bypass.assert_called_once()
+        self.assertIn("hi", mock_bypass.call_args[0])
+
+        queue_actions = []
+        while not self.app.state.msg_queue.empty():
+            queue_actions.append(self.app.state.msg_queue.get()[0])
+
+        self.assertIn("start_indicator", queue_actions)
+        self.assertIn("text", queue_actions)
+        self.assertIn("final_render", queue_actions)
+        self.assertIn("enable", queue_actions)
 
 if __name__ == "__main__":
     unittest.main()

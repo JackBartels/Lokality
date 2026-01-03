@@ -29,7 +29,30 @@ def thread_excepthook(args):
 
 # ANSI escape code stripper
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\-_]| \[0-?]*[ -/]*[@-~])')
-_OLLAMA_CLIENT = ollama.Client()
+
+class OllamaClientManager:
+    """Manages a singleton Ollama client instance."""
+    _instance = None
+
+    @classmethod
+    def get_client(cls):
+        """Returns the shared Ollama client."""
+        if cls._instance is None:
+            cls._instance = ollama.Client()
+        return cls._instance
+
+    @classmethod
+    def reset_client(cls):
+        """Resets the shared Ollama client instance."""
+        cls._instance = None
+
+def get_ollama_client():
+    """Returns a shared Ollama client instance, initializing it on first call."""
+    return OllamaClientManager.get_client()
+
+def reset_ollama_client():
+    """Resets the shared Ollama client (primarily for testing)."""
+    OllamaClientManager.reset_client()
 
 def strip_ansi(text):
     """Removes ANSI escape sequences from text."""
@@ -166,7 +189,7 @@ def verify_env_health():
     logger.info("[*] Performing environment health checks...")
 
     try:
-        _OLLAMA_CLIENT.list()
+        get_ollama_client().list()
     except (ollama.ResponseError, RuntimeError, ConnectionError) as exc:
         errors.append(format_error_msg(exc))
 

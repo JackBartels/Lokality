@@ -6,9 +6,9 @@ import ollama
 
 from config import MODEL_NAME
 from logger import logger
-from utils import debug_print
+from utils import debug_print, get_ollama_client
 
-client = ollama.Client()
+# client removed from here
 
 def _estimate_tokens(text):
     """
@@ -31,7 +31,7 @@ def _estimate_tokens(text):
 def _get_resource_usage(stats):
     """Fetches RAM and VRAM usage from Ollama ps."""
     try:
-        ps = client.ps()
+        ps = get_ollama_client().ps()
         models_list = getattr(ps, 'models', ps)
         for m in models_list:
             if m.model.split(":")[0] in MODEL_NAME or MODEL_NAME in m.model:
@@ -42,7 +42,7 @@ def _get_resource_usage(stats):
                     0, (total_bytes - vram_bytes) // (1024 * 1024)
                 )
                 break
-    except (AttributeError, ollama.ResponseError):
+    except (AttributeError, ollama.ResponseError, ConnectionError):
         pass
 
 def get_model_info(memory_store, system_prompt, messages):
@@ -59,7 +59,7 @@ def get_model_info(memory_store, system_prompt, messages):
         _get_resource_usage(stats)
 
         # Context estimation
-        show = client.show(MODEL_NAME)
+        show = get_ollama_client().show(MODEL_NAME)
         show_dict = show.model_dump()
         max_ctx = 8192 # Default fallback
         model_info = show_dict.get('modelinfo', {})
@@ -74,7 +74,7 @@ def get_model_info(memory_store, system_prompt, messages):
 
         stats["context_pct"] = min(100, (total_tokens / max_ctx) * 100)
 
-    except (AttributeError, ollama.ResponseError) as exc:
+    except (AttributeError, ollama.ResponseError, ConnectionError) as exc:
         logger.warning("Error gathering stats: %s", exc)
         debug_print(f"[*] Error gathering info: {exc}")
 

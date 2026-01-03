@@ -9,9 +9,10 @@ from stats_collector import get_model_info
 class TestStatsCollector(unittest.TestCase):
     """Test suite for StatsCollector."""
 
-    @patch('stats_collector.client')
-    def test_get_model_info(self, mock_client):
+    @patch('stats_collector.get_ollama_client')
+    def test_get_model_info(self, mock_get_client):
         """Test retrieving model info from Ollama."""
+        mock_client = mock_get_client.return_value
         # Mock memory store
         mock_memory = MagicMock()
         mock_memory.get_fact_count.return_value = 10
@@ -47,9 +48,10 @@ class TestStatsCollector(unittest.TestCase):
             self.assertEqual(stats['ram_mb'], 1000)
             self.assertGreater(stats['context_pct'], 0)
 
-    @patch('stats_collector.client')
-    def test_get_model_info_error(self, mock_client):
+    @patch('stats_collector.get_ollama_client')
+    def test_get_model_info_error(self, mock_get_client):
         """Test handling of Ollama errors."""
+        mock_client = mock_get_client.return_value
         # Simulate an error in ollama client
         mock_client.ps.side_effect = ollama.ResponseError("Ollama offline")
 

@@ -22,8 +22,22 @@ class BaseAssistantTest(unittest.TestCase):
         self.mocks['memory'] = self.mocks['memory_instance']
 
         # client patch
-        self.patchers['client'] = patch('local_assistant.client')
-        self.mocks['client'] = self.patchers['client'].start()
+        self.patchers['client'] = patch('local_assistant.get_ollama_client')
+        self.mocks['get_client'] = self.patchers['client'].start()
+        self.mocks['client'] = self.mocks['get_client'].return_value
+        # Also patch it in other modules just in case
+        self.patchers['client_cs'] = patch(
+            'complexity_scorer.get_ollama_client', new=self.mocks['get_client']
+        )
+        self.patchers['client_cs'].start()
+        self.patchers['client_mm'] = patch(
+            'memory_manager.get_ollama_client', new=self.mocks['get_client']
+        )
+        self.patchers['client_mm'].start()
+        self.patchers['client_sc'] = patch(
+            'stats_collector.get_ollama_client', new=self.mocks['get_client']
+        )
+        self.patchers['client_sc'].start()
 
         # ComplexityScorer patch
         self.patchers['ctx'] = patch('local_assistant.ComplexityScorer.get_safe_context_size')

@@ -32,6 +32,7 @@ from utils import (
     debug_print,
     error_print,
     format_error_msg,
+    get_ollama_client,
     info_print,
     round_rectangle,
     thread_excepthook,
@@ -107,7 +108,7 @@ class AssistantApp:
                 error_print(f"Environment check failed: {err}")
 
             print("Type /help for commands.\n")
-        except (ImportError, RuntimeError, ValueError) as exc:
+        except (ImportError, RuntimeError, ValueError, ConnectionError) as exc:
             error_print(f"Initialization failed: {format_error_msg(exc)}")
 
     def handle_tk_exception(self, exc, val, tback):
@@ -497,7 +498,7 @@ class AssistantApp:
         """Handles the streaming response from the LLM."""
         try:
             full_resp = ""
-            stream = local_assistant.client.chat(
+            stream = get_ollama_client().chat(
                 model=config.MODEL_NAME, messages=msgs,
                 stream=True, options=complexity['params']
             )
@@ -509,8 +510,8 @@ class AssistantApp:
                 self.state.msg_queue.put(("text", cnt, "assistant"))
 
             self._finalize_chat_response(user_input, full_resp)
-        except (ollama.ResponseError, AttributeError) as exc:
-            error_print(f"Assistant Error: {exc}")
+        except (ollama.ResponseError, AttributeError, ConnectionError) as exc:
+            error_print(f"Assistant Error: {format_error_msg(exc)}")
 
     def _finalize_chat_response(self, user_input, full_resp):
         """Stores result and triggers final rendering."""
@@ -622,19 +623,30 @@ class AssistantApp:
         logger.info("Bypass command invoked: %s...", raw[:50])
         if not raw:
             self.state.msg_queue.put(("text", "Usage: /bypass <prompt>\n", "system"))
+            self.state.msg_queue.put(("enable", None, None))
         else:
             self.state.msg_queue.put(("start_indicator", None, None))
-            _, proc = run_ollama_bypass(
-                raw, self.state.msg_queue, lambda: self.state.process.stop_generation
-            )
-            self.state.process.active = proc
-            msg = "[Interrupted]" if self.state.process.stop_generation else "\n"
-            tag = "cancelled" if self.state.process.stop_generation else "assistant"
-            self.state.msg_queue.put(("text", msg, tag))
-            if not self.state.process.stop_generation:
-                self.state.msg_queue.put(("final_render", "", "assistant"))
-            self._stop_active_process()
-        self.state.msg_queue.put(("enable", None, None))
+
+            def _assign_proc(proc):
+                self.state.process.active = proc
+
+            def run_bypass():
+                try:
+                    run_ollama_bypass(
+                        raw, self.state.msg_queue,
+                        lambda: self.state.process.stop_generation,
+                        start_callback=_assign_proc
+                    )
+                    msg = "[Interrupted]" if self.state.process.stop_generation else "\n"
+                    tag = "cancelled" if self.state.process.stop_generation else "assistant"
+                    self.state.msg_queue.put(("text", msg, tag))
+                    if not self.state.process.stop_generation:
+                        self.state.msg_queue.put(("final_render", "", "assistant"))
+                    self._stop_active_process()
+                finally:
+                    self.state.msg_queue.put(("enable", None, None))
+
+            threading.Thread(target=run_bypass, daemon=True).start()
 
     def _replace_last_message(self, text, tag):
         """Replaces the last message in the chat."""
@@ -840,12 +852,16 @@ class AssistantApp:
         """Fetches and displays model info in the info panel."""
         if not self.state.show_info or not self.state.assistant:
             return
-        threading.Thread(
-            target=lambda: self.state.msg_queue.put(
-                ("update_info_ui", self.state.assistant.get_model_info(), None)
-            ),
-            daemon=True
-        ).start()
+
+        def _fetch():
+            try:
+                info = self.state.assistant.get_model_info()
+                self.state.msg_queue.put(("update_info_ui", info, None))
+            except ConnectionError:
+                # Silently ignore connection errors during background stats refresh
+                pass
+
+        threading.Thread(target=_fetch, daemon=True).start()
 
     def _cancel_generation(self, _=None):
         """Cancels any ongoing model generation."""

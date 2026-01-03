@@ -92,7 +92,7 @@ def _start_ollama_process(slave):
         text=True, bufsize=0, env=new_env, close_fds=True
     )
 
-def run_ollama_bypass(prompt, msg_queue, stop_check_callback):
+def run_ollama_bypass(prompt, msg_queue, stop_check_callback, start_callback=None):
     """Runs Ollama in bypass mode using a PTY for raw CLI interaction."""
     logger.info("Starting bypass mode for prompt: %s...", prompt[:50])
     master = None
@@ -101,6 +101,9 @@ def run_ollama_bypass(prompt, msg_queue, stop_check_callback):
         master, slave = pty.openpty()
         process = _start_ollama_process(slave)
         os.close(slave)
+
+        if start_callback:
+            start_callback(process)
 
         state = {
             "full_response": "", "in_ansi": False, "prompt_detector": "",

@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 from memory import MemoryStore
-from utils import verify_env_health
+from utils import verify_env_health, reset_ollama_client
 
 class TestRobustness(unittest.TestCase):
     """Test suite for robustness checks."""
@@ -16,12 +16,14 @@ class TestRobustness(unittest.TestCase):
     def setUp(self):
         """Set up test variables."""
         self.write_result = None
+        reset_ollama_client()
 
-    @patch('utils.ollama.Client')
-    def test_verify_environment_writable(self, mock_ollama):
+    @patch('utils.get_ollama_client')
+    def test_verify_environment_writable(self, mock_get_client):
         """Test environment health check."""
         # Mock Ollama to respond successfully
-        mock_ollama.return_value.list.return_value = {'models': []}
+        mock_client = mock_get_client.return_value
+        mock_client.list.return_value = {'models': []}
 
         # This should pass in the current environment
         success, errors = verify_env_health()

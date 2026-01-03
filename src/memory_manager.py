@@ -10,9 +10,9 @@ import ollama
 import config
 from complexity_scorer import ComplexityScorer
 from config import MEMORY_EXTRACTION_MAX_TOKENS, CONTEXT_WINDOW_SIZE
-from utils import debug_print, error_print
+from utils import debug_print, error_print, get_ollama_client
 
-client = ollama.Client()
+# client removed from here
 
 class MemoryManager:
     """Manages the extraction of permanent facts from user interactions."""
@@ -126,7 +126,7 @@ class MemoryManager:
             # VRAM Safety check for context size
             safe_ctx = ComplexityScorer.get_safe_context_size(CONTEXT_WINDOW_SIZE)
 
-            res = client.chat(
+            res = get_ollama_client().chat(
                 model=config.MODEL_NAME,
                 messages=[
                     {"role": "system", "content": system_instructions},
