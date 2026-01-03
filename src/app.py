@@ -53,15 +53,27 @@ def thread_excepthook(args):
 threading.excepthook = thread_excepthook
 
 @dataclass
+class IndicatorState:
+    """Holds the thinking indicator state."""
+    active: bool = False
+    char: str = config.INDICATOR_CHARS[0]
+
+@dataclass
+class ResponseState:
+    """Holds the current response state."""
+    full_text: str = ""
+    last_rendered_len: int = 0
+
+@dataclass
 class AppState:
     """Holds the application state."""
     assistant: Optional[Any] = None
     stop_generation: bool = False
     active_process: Optional[Any] = None
-    full_current_response: str = ""
-    last_rendered_len: int = 0
+    response: ResponseState = field(default_factory=ResponseState)
     show_info: bool = False
     msg_queue: queue.Queue = field(default_factory=queue.Queue)
+    indicator: IndicatorState = field(default_factory=IndicatorState)
 
 @dataclass
 class ChatUI:
@@ -281,6 +293,7 @@ class AssistantApp:
         cfg = self.ui.chat.display.tag_config
         cfg("user", foreground=Theme.USER_COLOR, font=self.fonts["bold"])
         cfg("assistant", foreground=Theme.FG_COLOR, font=self.fonts["base"])
+        cfg("indicator", foreground=Theme.INDICATOR_COLOR, font=self.fonts["indicator"])
         cfg("system", foreground=Theme.SYSTEM_COLOR, font=self.fonts["small"],
             tabs=("240",))
         cfg("error", foreground=Theme.ERROR_COLOR)
@@ -533,7 +546,7 @@ class AssistantApp:
                 self._cmd_bypass(user_input)
                 return
 
-            self.state.msg_queue.put(("text", "\n", "assistant"))
+            self.state.msg_queue.put(("start_indicator", None, None))
 
             def run_assistant():
                 complexity = ComplexityScorer.analyze(user_input)
@@ -602,7 +615,7 @@ class AssistantApp:
         if not raw:
             self.state.msg_queue.put(("text", "Usage: /bypass <prompt>\n", "system"))
         else:
-            self.state.msg_queue.put(("text", "\n", "assistant"))
+            self.state.msg_queue.put(("start_indicator", None, None))
             _, proc = ShellIntegration.run_ollama_bypass(
                 raw, self.state.msg_queue, lambda: self.state.stop_generation
             )
@@ -630,23 +643,35 @@ class AssistantApp:
     def _render_assistant_stream(self, text, final):
         """Helper to render assistant text stream with markdown."""
         if not final:
-            self.state.full_current_response += text
+            self.state.response.full_text += text
         if "\n" in text or final:
-            cur = self.state.full_current_response.strip()
-            if len(cur) > self.state.last_rendered_len:
+            cur = self.state.response.full_text.strip()
+            if len(cur) > self.state.response.last_rendered_len or final:
                 self.ui.chat.display.delete("assistant_msg_start", tk.END)
+
+                # Ensure we are still on a new line after deletion
+                if self.ui.chat.display.index("assistant_msg_start") != "1.0":
+                    if self.ui.chat.display.get("assistant_msg_start - 1 chars") != "\n":
+                        self.ui.chat.display.mark_gravity("assistant_msg_start", tk.RIGHT)
+                        self.ui.chat.display.insert("assistant_msg_start", "\n")
+                        self.ui.chat.display.mark_gravity("assistant_msg_start", tk.LEFT)
+
+                if self.state.indicator.active:
+                    self.ui.chat.display.insert(
+                        "assistant_msg_start", f"{self.state.indicator.char} ", "indicator"
+                    )
                 try:
                     toks = self.md_parser(cur)
                     self.markdown_engine.render_tokens(toks, "assistant")
-                    self.state.last_rendered_len = len(cur)
+                    self.state.response.last_rendered_len = len(cur)
                 except (ValueError, TypeError):
                     self.ui.chat.display.insert(
-                        tk.END, self.state.full_current_response, "assistant"
+                        "end-1c", self.state.response.full_text, "assistant"
                     )
             if final:
                 self.finalize_message_turn()
         else:
-            self.ui.chat.display.insert(tk.END, text, "assistant")
+            self.ui.chat.display.insert("end-1c", text, "assistant")
 
     def display_message(self, text, tag, final=False):
         """Renders messages in the chat display with Markdown support."""
@@ -655,24 +680,32 @@ class AssistantApp:
             if tag == "cancelled":
                 self.ui.chat.display.delete("assistant_msg_start", tk.END)
                 try:
-                    toks = self.md_parser(self.state.full_current_response.strip())
+                    toks = self.md_parser(self.state.response.full_text.strip())
                     self.markdown_engine.render_tokens(toks, "assistant")
                 except (ValueError, TypeError):
                     self.ui.chat.display.insert(
-                        tk.END, self.state.full_current_response, "assistant"
+                        "end-1c", self.state.response.full_text, "assistant"
                     )
-                self.ui.chat.display.insert(tk.END, text, "cancelled")
+                self.ui.chat.display.insert("end-1c", text, "cancelled")
                 self.finalize_message_turn()
             elif tag == "assistant":
                 self._render_assistant_stream(text, final)
             else:
-                self.ui.chat.display.insert(tk.END, text, tag)
-                self.state.full_current_response = ""
-                self.state.last_rendered_len = 0
+                if self.state.indicator.active and tag in ("system", "error"):
+                    # Insert before the indicator/response region to avoid interference
+                    if not text.endswith("\n"):
+                        text += "\n"
+                    self.ui.chat.display.mark_gravity("assistant_msg_start", tk.RIGHT)
+                    self.ui.chat.display.insert("assistant_msg_start", text, tag)
+                    self.ui.chat.display.mark_gravity("assistant_msg_start", tk.LEFT)
+                else:
+                    self.ui.chat.display.insert("end-1c", text, tag)
+                self.state.response.full_text = ""
+                self.state.response.last_rendered_len = 0
                 if tag == "user":
                     self.finalize_message_turn()
         except (tk.TclError, ValueError) as exc:
-            self.ui.chat.display.insert(tk.END, f"\n[GUI Error: {exc}]\n", "error")
+            self.ui.chat.display.insert("end-1c", f"\n[GUI Error: {exc}]\n", "error")
         finally:
             self.ui.chat.display.see(tk.END)
             self.ui.chat.display.config(state='disabled')
@@ -680,17 +713,25 @@ class AssistantApp:
     def finalize_message_turn(self):
         """Handles post-message-turn cleanup and UI elements."""
         try:
-            if self.ui.chat.display.get("end-2c", "end-1c") == "\n":
-                self.ui.chat.display.delete("end-2c", "end-1c")
+            # Only delete the trailing newline if it's strictly AFTER the assistant_msg_start mark.
+            # This prevents merging lines if the response is empty.
+            if self.ui.chat.display.compare("end-2c", ">", "assistant_msg_start"):
+                if self.ui.chat.display.get("end-2c", "end-1c") == "\n":
+                    self.ui.chat.display.delete("end-2c", "end-1c")
             self.insert_separator(height=40)
             self.ui.chat.display.mark_set("assistant_msg_start", "end-1c")
-            self.state.full_current_response = ""
+            self.state.response.full_text = ""
         except tk.TclError:
             pass
 
     def insert_separator(self, height=25):
         """Inserts a horizontal separator into the chat display."""
         try:
+            # Ensure separator starts on a new line
+            if self.ui.chat.display.index("end-1c") != "1.0":
+                if self.ui.chat.display.get("end-2c", "end-1c") != "\n":
+                    self.ui.chat.display.insert("end-1c", "\n")
+
             w = max(600, self.ui.chat.display.winfo_width() - 40)
             canv = tk.Canvas(self.ui.chat.display, bg=Theme.BG_COLOR, height=height,
                              highlightthickness=0, width=w)
@@ -707,10 +748,10 @@ class AssistantApp:
             canv.bind("<Button-4>", _on_linux_up)
             canv.bind("<Button-5>", _on_linux_down)
 
-            self.ui.chat.display.window_create(tk.END, window=canv)
-            self.ui.chat.display.insert(tk.END, "\n")
+            self.ui.chat.display.window_create("end-1c", window=canv)
+            self.ui.chat.display.insert("end-1c", "\n")
         except tk.TclError:
-            self.ui.chat.display.insert(tk.END, "-"*20 + "\n")
+            self.ui.chat.display.insert("end-1c", "-"*20 + "\n")
 
     def handle_tooltip(self, _, url):
         """Displays a tooltip for links in the chat area."""
@@ -752,7 +793,11 @@ class AssistantApp:
     def _dispatch_queue_action(self, action, content, tag):
         """Dispatcher for UI actions from the message queue."""
         if action == "text":
+            if tag == "cancelled":
+                self.state.indicator.active = False
             self.display_message(content, tag)
+        elif action == "start_indicator":
+            self._start_indicator()
         elif action == "replace_last":
             self.replace_last_message(content, tag)
         elif action == "clear":
@@ -765,6 +810,7 @@ class AssistantApp:
             self.insert_separator(height=40)
             self.ui.chat.display.config(state='disabled')
         elif action == "final_render":
+            self.state.indicator.active = False
             self.display_message("", tag, final=True)
             self.update_info_display()
         elif action == "toggle_info":
@@ -800,6 +846,61 @@ class AssistantApp:
         """Handles application shutdown."""
         self._stop_active_process()
         self.root.destroy()
+
+    def _start_indicator(self):
+        """Starts the thinking/responding indicator."""
+        if not self.state.indicator.active:
+            self.state.indicator.active = True
+            self.state.indicator.char = config.INDICATOR_CHARS[0]
+            self.ui.chat.display.config(state='normal')
+            try:
+                # Ensure we start on a new line
+                if self.ui.chat.display.index("end-1c") != "1.0":
+                    if self.ui.chat.display.get("end-2c", "end-1c") != "\n":
+                        self.ui.chat.display.insert("end-1c", "\n")
+
+                # Move mark to current end to isolate from previous logs
+                self.ui.chat.display.mark_set("assistant_msg_start", "end-1c")
+
+                self.ui.chat.display.insert(
+                    "assistant_msg_start", f"{self.state.indicator.char} ", "indicator"
+                )
+            except tk.TclError:
+                pass
+            finally:
+                self.ui.chat.display.config(state='disabled')
+            self._toggle_indicator()
+
+    def _toggle_indicator(self):
+        """Alternates the indicator symbol every second."""
+        if not self.state.indicator.active:
+            return
+
+        chars = config.INDICATOR_CHARS
+        try:
+            idx = chars.index(self.state.indicator.char)
+            self.state.indicator.char = chars[(idx + 1) % len(chars)]
+        except ValueError:
+            self.state.indicator.char = chars[0]
+
+        self._update_indicator_ui()
+        self.root.after(700, self._toggle_indicator)
+
+    def _update_indicator_ui(self):
+        """Updates the indicator symbol in the chat display."""
+        if not self.state.indicator.active:
+            return
+        self.ui.chat.display.config(state='normal')
+        try:
+            # Replace only the symbol character, preserving the trailing space
+            self.ui.chat.display.delete("assistant_msg_start", "assistant_msg_start + 1 chars")
+            self.ui.chat.display.insert(
+                "assistant_msg_start", self.state.indicator.char, "indicator"
+            )
+        except tk.TclError:
+            pass
+        finally:
+            self.ui.chat.display.config(state='disabled')
 
 if __name__ == "__main__":
     root_win = tk.Tk()

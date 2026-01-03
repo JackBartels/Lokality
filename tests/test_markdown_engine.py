@@ -23,7 +23,7 @@ class TestMarkdownEngine(unittest.TestCase):
         self.engine.render_tokens(
             tokens, "base"
         )
-        self.mock_text.insert.assert_called_with(tk.END, 'Hello world', ('base',))
+        self.mock_text.insert.assert_called_with("end-1c", 'Hello world', ('base',))
 
     def test_render_bold(self):
         """Test rendering bold text."""
@@ -32,7 +32,7 @@ class TestMarkdownEngine(unittest.TestCase):
         self.engine.render_tokens(
             tokens, "base"
         )
-        self.mock_text.insert.assert_called_with(tk.END, 'Bold text', ('md_bold', 'base'))
+        self.mock_text.insert.assert_called_with("end-1c", 'Bold text', ('md_bold', 'base'))
 
     def test_render_italic(self):
         """Test rendering italic text."""
@@ -43,7 +43,7 @@ class TestMarkdownEngine(unittest.TestCase):
         self.engine.render_tokens(
             tokens, "base"
         )
-        self.mock_text.insert.assert_called_with(tk.END, 'Italic text', ('md_italic', 'base'))
+        self.mock_text.insert.assert_called_with("end-1c", 'Italic text', ('md_italic', 'base'))
 
     def test_render_bold_italic(self):
         """Test rendering nested bold and italic text."""
@@ -60,7 +60,7 @@ class TestMarkdownEngine(unittest.TestCase):
         )
         # Should use the combined tag
         self.mock_text.insert.assert_called_with(
-            tk.END, 'Bold Italic', ('md_bold_italic', 'base')
+            "end-1c", 'Bold Italic', ('md_bold_italic', 'base')
         )
 
     def test_render_strikethrough(self):
@@ -73,7 +73,7 @@ class TestMarkdownEngine(unittest.TestCase):
             tokens, "base"
         )
         self.mock_text.insert.assert_called_with(
-            tk.END, 'deleted', ('md_strikethrough', 'base')
+            "end-1c", 'deleted', ('md_strikethrough', 'base')
         )
 
     def test_render_subscript(self):
@@ -85,7 +85,7 @@ class TestMarkdownEngine(unittest.TestCase):
         self.engine.render_tokens(
             tokens, "base"
         )
-        self.mock_text.insert.assert_called_with(tk.END, 'sub', ('md_sub', 'base'))
+        self.mock_text.insert.assert_called_with("end-1c", 'sub', ('md_sub', 'base'))
 
     def test_render_superscript(self):
         """Test rendering superscript text."""
@@ -96,7 +96,7 @@ class TestMarkdownEngine(unittest.TestCase):
         self.engine.render_tokens(
             tokens, "base"
         )
-        self.mock_text.insert.assert_called_with(tk.END, 'sup', ('md_sup', 'base'))
+        self.mock_text.insert.assert_called_with("end-1c", 'sup', ('md_sup', 'base'))
 
     def test_render_paragraph(self):
         """Test rendering a paragraph."""
@@ -107,8 +107,8 @@ class TestMarkdownEngine(unittest.TestCase):
         self.engine.render_tokens(
             tokens, "base"
         )
-        self.mock_text.insert.assert_any_call(tk.END, 'Para', ('base',))
-        self.mock_text.insert.assert_any_call(tk.END, '\n\n')
+        self.mock_text.insert.assert_any_call("end-1c", 'Para', ('base',))
+        self.mock_text.insert.assert_any_call("end-1c", '\n\n')
 
     def test_render_codespan(self):
         """Test rendering inline code."""
@@ -116,7 +116,7 @@ class TestMarkdownEngine(unittest.TestCase):
         self.engine.render_tokens(
             tokens, "base"
         )
-        self.mock_text.insert.assert_called_with(tk.END, 'code', ('md_code', 'base'))
+        self.mock_text.insert.assert_called_with("end-1c", 'code', ('md_code', 'base'))
 
     def test_render_list_simple(self):
         """Test rendering a simple unordered list."""
@@ -130,8 +130,8 @@ class TestMarkdownEngine(unittest.TestCase):
         self.engine.render_tokens(
             tokens, "base"
         )
-        self.mock_text.insert.assert_any_call(tk.END, "• ", "base")
-        self.mock_text.insert.assert_any_call(tk.END, 'Item 1', ('base',))
+        self.mock_text.insert.assert_any_call("end-1c", "• ", "base")
+        self.mock_text.insert.assert_any_call("end-1c", 'Item 1', ('base',))
 
     def test_render_list_ordered(self):
         """Test rendering an ordered list."""
@@ -145,8 +145,8 @@ class TestMarkdownEngine(unittest.TestCase):
         self.engine.render_tokens(
             tokens, "base"
         )
-        self.mock_text.insert.assert_any_call(tk.END, "1. ", "base")
-        self.mock_text.insert.assert_any_call(tk.END, 'First', ('base',))
+        self.mock_text.insert.assert_any_call("end-1c", "1. ", "base")
+        self.mock_text.insert.assert_any_call("end-1c", 'First', ('base',))
 
     def test_render_list_nested(self):
         """Test rendering a nested list."""
@@ -170,10 +170,10 @@ class TestMarkdownEngine(unittest.TestCase):
             tokens, "base"
         )
         # Check parent bullet
-        self.mock_text.insert.assert_any_call(tk.END, "• ", "base")
+        self.mock_text.insert.assert_any_call("end-1c", "• ", "base")
         # Check nested bullet (indented)
-        self.mock_text.insert.assert_any_call(tk.END, "    • ", "base")
-        self.mock_text.insert.assert_any_call(tk.END, 'Child', ('base',))
+        self.mock_text.insert.assert_any_call("end-1c", "    • ", "base")
+        self.mock_text.insert.assert_any_call("end-1c", 'Child', ('base',))
 
     def test_render_blockquote(self):
         """Test rendering a blockquote."""
@@ -185,8 +185,8 @@ class TestMarkdownEngine(unittest.TestCase):
             tokens, "base"
         )
         # Check for bar character and styling
-        self.mock_text.insert.assert_any_call(tk.END, "┃ ", ("md_quote_bar", "base"))
-        self.mock_text.insert.assert_any_call(tk.END, 'Quote', ('md_quote', 'base'))
+        self.mock_text.insert.assert_any_call("end-1c", "┃ ", ("md_quote_bar", "base"))
+        self.mock_text.insert.assert_any_call("end-1c", 'Quote', ('md_quote', 'base'))
 
     def test_render_thematic_break(self):
         """Test rendering a thematic break."""

@@ -144,7 +144,7 @@ class MarkdownEngine:
     def _handle_paragraph(self, token, base_tag, style_tags, level):
         """Renders a paragraph token."""
         self.render_tokens(token['children'], base_tag, style_tags, level)
-        self.text_widget.insert(tk.END, "\n" if level > 0 else "\n\n")
+        self.text_widget.insert("end-1c", "\n" if level > 0 else "\n\n")
 
     def _handle_block_text(self, token, base_tag, style_tags, level):
         """Renders a block_text token."""
@@ -154,7 +154,7 @@ class MarkdownEngine:
         """Renders a text token."""
         del level
         content = token.get('raw', token.get('text', ''))
-        self.text_widget.insert(tk.END, content, tuple(style_tags + [base_tag]))
+        self.text_widget.insert("end-1c", content, tuple(style_tags + [base_tag]))
 
     def _handle_strong(self, token, base_tag, style_tags, level):
         """Renders a strong token."""
@@ -182,27 +182,27 @@ class MarkdownEngine:
     def _handle_codespan(self, token, base_tag, style_tags, level):
         """Renders a codespan token."""
         del style_tags, level
-        self.text_widget.insert(tk.END, token.get('raw', ''), ("md_code", base_tag))
+        self.text_widget.insert("end-1c", token.get('raw', ''), ("md_code", base_tag))
 
     def _handle_block_code(self, token, base_tag, style_tags, level):
         """Renders a block_code token."""
         del style_tags, level
-        self.text_widget.insert(tk.END, token.get('raw', ''), ("md_code", base_tag))
-        self.text_widget.insert(tk.END, "\n", base_tag)
+        self.text_widget.insert("end-1c", token.get('raw', ''), ("md_code", base_tag))
+        self.text_widget.insert("end-1c", "\n", base_tag)
 
     def _handle_heading(self, token, base_tag, style_tags, level):
         """Renders a heading token."""
         del style_tags
         if self.text_widget.index("end-1c") != "1.0":
-            self.text_widget.insert(tk.END, "\n")
+            self.text_widget.insert("end-1c", "\n")
         h_level = min(3, token['attrs']['level'])
         self.render_tokens(token['children'], base_tag, f"md_h{h_level}", level)
-        self.text_widget.insert(tk.END, "\n")
+        self.text_widget.insert("end-1c", "\n")
 
     def _handle_softbreak(self, token, base_tag, style_tags, level):
         """Renders a softbreak token."""
         del token, base_tag, style_tags, level
-        self.text_widget.insert(tk.END, "\n")
+        self.text_widget.insert("end-1c", "\n")
 
     def _handle_thematic_break(self, token, base_tag, style_tags, level):
         """Renders a thick horizontal rule."""
@@ -214,20 +214,20 @@ class MarkdownEngine:
         )
         canv.create_line(0, 3, width, 3, fill=Theme.ACCENT_COLOR, width=4)
         self._bind_scroll(canv)
-        self.text_widget.insert(tk.END, "\n")
-        self.text_widget.window_create(tk.END, window=canv)
-        self.text_widget.insert(tk.END, "\n\n")
+        self.text_widget.insert("end-1c", "\n")
+        self.text_widget.window_create("end-1c", window=canv)
+        self.text_widget.insert("end-1c", "\n\n")
 
     def _handle_block_quote(self, token, base_tag, style_tags, level):
         """Renders a blockquote with a vertical sidebar indicator."""
         if self.text_widget.index("end-1c") != "1.0":
-            self.text_widget.insert(tk.END, "\n")
-        self.text_widget.insert(tk.END, "┃ ", ("md_quote_bar", base_tag))
+            self.text_widget.insert("end-1c", "\n")
+        self.text_widget.insert("end-1c", "┃ ", ("md_quote_bar", base_tag))
         self.render_tokens(
             token['children'], base_tag, style_tags + ["md_quote"], level + 1
         )
         if self.text_widget.get("end-2c", "end-1c") != "\n":
-            self.text_widget.insert(tk.END, "\n")
+            self.text_widget.insert("end-1c", "\n")
 
     def _handle_list(self, token, base_tag, style_tags, level):
         """Renders a list token."""
@@ -241,12 +241,12 @@ class MarkdownEngine:
                 self.text_widget.get("end-2c", "end-1c") != "\n" and
                 self.text_widget.index("end-1c") != "1.0"
             ):
-                self.text_widget.insert(tk.END, "\n")
+                self.text_widget.insert("end-1c", "\n")
             prefix = f"{indent}{start + i}. " if ordered else f"{indent}• "
-            self.text_widget.insert(tk.END, prefix, base_tag)
+            self.text_widget.insert("end-1c", prefix, base_tag)
             self.render_tokens(item['children'], base_tag, level=level + 1)
         if level == 0:
-            self.text_widget.insert(tk.END, "\n")
+            self.text_widget.insert("end-1c", "\n")
 
     def _handle_link(self, token, base_tag, style_tags, level):
         """Renders a link token."""
@@ -255,7 +255,7 @@ class MarkdownEngine:
         url = token['attrs']['url']
         link_id = f"link_data_{hash(url)}"
         self.url_map[link_id] = url
-        self.text_widget.insert(tk.END, link_text, ("md_link", link_id))
+        self.text_widget.insert("end-1c", link_text, ("md_link", link_id))
 
     def _handle_table(self, token, base_tag, style_tags, level):
         """Parses and renders a Markdown table."""
@@ -274,9 +274,9 @@ class MarkdownEngine:
                 frame.grid_columnconfigure(j, weight=1)
 
             self._bind_scroll(frame)
-            self.text_widget.insert(tk.END, "\n")
-            self.text_widget.window_create(tk.END, window=frame)
-            self.text_widget.insert(tk.END, "\n")
+            self.text_widget.insert("end-1c", "\n")
+            self.text_widget.window_create("end-1c", window=frame)
+            self.text_widget.insert("end-1c", "\n")
 
         except (ValueError, TypeError, KeyError) as exc:
             debug_print(f"Markdown: Error rendering table: {exc}")

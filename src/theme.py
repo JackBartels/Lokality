@@ -22,6 +22,7 @@ class Theme:
 
     # Tags Colors
     USER_COLOR = "#90CAF9"
+    INDICATOR_COLOR = "#818CF8"  # Electric Indigo
     SYSTEM_COLOR = "#B0BEC5"
     ERROR_COLOR = "#EF9A9A"
     CANCELLED_COLOR = "#B05555"
@@ -51,7 +52,8 @@ class Theme:
             "h2": (base_family, 17, "bold"),
             "h3": (base_family, 14, "bold"),
             "unit": (base_family, 9, "bold"),
-            "tooltip": (base_family, 9)
+            "tooltip": (base_family, 9),
+            "indicator": (base_family, 13)
         }
 
     @staticmethod
