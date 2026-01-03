@@ -61,6 +61,7 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 
 - `src/`: Refactored into specialized modules.
   - `app.py`: Main entry point and GUI orchestration. Consolidated process management and dispatcher-based queue polling.
+  - `app_state.py`: Centralized state management using dataclasses for UI components, process status, and response handling.
   - `complexity_scorer.py`: Analyzes user input to dynamically adjust model parameters (context window, temperature, penalties) based on predicted complexity and creativity.
   - `config.py`: Global constants.
   - `theme.py`: UI styling, colors, and font definitions.

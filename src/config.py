@@ -3,7 +3,7 @@ Configuration constants for Lokality.
 """
 import os
 
-VERSION = "v0.1.2"
+VERSION = "v0.1.3"
 MODEL_NAME = os.environ.get("LOKALITY_MODEL", "gemma3:4b-it-qat")
 
 # Default models ordered by size/resource requirement

@@ -1,4 +1,4 @@
-# Lokality (v0.1.2)
+# Lokality (v0.1.3)
 
 ## Description
 Lokality is a local-first, privacy-focused desktop AI assistant wrapper. Powered by Ollama and built with Python, it provides a modern chat interface with real-time internet access, long-term memory capabilities, and many other useful features.
@@ -60,6 +60,7 @@ PYTHONPATH=src .venv/bin/python3 -m unittest discover tests
     - **Tables** with bordered graphical rendering.
     - **Horizontal Rules** for thematic separation.
     - Clickable links with tooltips.
+- **Enhanced Thinking Indicator**: Features a modern, minimalist pulsing animation to clearly signal when the assistant is processing or generating a response.
 - **Modern GUI**: A sleek, blue-toned desaturated purple interface featuring 6px thick rounded borders, dynamic message separators, and a responsive flow layout.
 - **Smart Input**: A dynamic input box that expands vertically as you type (including automatic expansion for word-wrapped lines) and features tab-completion for slash commands.
 - **Persistent Logging**: Centralized logging system that records session details to the `logs/` directory with automatic cleanup of files older than 30 days.
