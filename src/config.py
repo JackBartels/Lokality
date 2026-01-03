@@ -16,9 +16,6 @@ DEFAULT_MODELS = [
 ]
 
 # Model performance tuning
-SEARCH_DECISION_MAX_TOKENS = 100
-MEMORY_EXTRACTION_MAX_TOKENS = 200
-CONTEXT_WINDOW_SIZE = 4096
 
 # This can be toggled at runtime via /debug
 DEBUG = os.environ.get("DEBUG", "0") == "1"

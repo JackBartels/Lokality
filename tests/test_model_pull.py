@@ -2,7 +2,7 @@
 Unit tests for model pulling logic and system resource detection.
 """
 import unittest
-from unittest.mock import patch, mock_open
+from unittest.mock import patch, mock_open, MagicMock
 import local_assistant
 import utils
 from tests.base_test import BaseAssistantTest
@@ -18,13 +18,17 @@ class TestModelPull(BaseAssistantTest):
 
     def test_init_with_existing_models(self):
         """Test initialization when models already exist."""
-        self.mocks['client'].list.return_value = {'models': ['some-model']}
+        mock_response = MagicMock()
+        mock_response.models = [MagicMock(model='some-model')]
+        self.mocks['client'].list.return_value = mock_response
         local_assistant.LocalChatAssistant()
         self.mocks['client'].pull.assert_not_called()
 
     def test_init_no_models_pulls_best_fit(self):
         """Test that the best fitting model is pulled if none exist."""
-        self.mocks['client'].list.return_value = {'models': []}
+        mock_response = MagicMock()
+        mock_response.models = []
+        self.mocks['client'].list.return_value = mock_response
         self.mocks['resources'].return_value = (16384, 8192) # 16GB RAM, 8GB VRAM
         self.mocks['client'].pull.return_value = [{'status': 'success'}]
 
@@ -34,14 +38,18 @@ class TestModelPull(BaseAssistantTest):
 
     def test_init_insufficient_vram_pulls_nothing(self):
         """Test that nothing is pulled if VRAM is insufficient."""
-        self.mocks['client'].list.return_value = {'models': []}
+        mock_response = MagicMock()
+        mock_response.models = []
+        self.mocks['client'].list.return_value = mock_response
         self.mocks['resources'].return_value = (16384, 512)
         local_assistant.LocalChatAssistant()
         self.mocks['client'].pull.assert_not_called()
 
     def test_init_mixed_resources_picks_correct_size(self):
         """Test model selection with mixed resources."""
-        self.mocks['client'].list.return_value = {'models': []}
+        mock_response = MagicMock()
+        mock_response.models = []
+        self.mocks['client'].list.return_value = mock_response
         self.mocks['resources'].return_value = (65536, 1536)
         self.mocks['client'].pull.return_value = [{'status': 'success'}]
 

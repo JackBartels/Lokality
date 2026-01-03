@@ -45,6 +45,9 @@ class TestCommands(unittest.TestCase):
         root = mocks[0].return_value
 
         self.app = AssistantApp(root)
+        # Manually trigger assistant initialization with a mock
+        self.app.state.assistant = MagicMock()
+        self.app.state.assistant.messages = []
 
     def tearDown(self):
         """Stop all patchers."""

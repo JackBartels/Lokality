@@ -27,6 +27,10 @@ from shell_integration import run_ollama_bypass
 import theme as Theme
 from app_state import AppState, AppUI, CanvasConfig, SLASH_COMMANDS
 from ui_components import CustomScrollbar, InfoPanel
+from ui_helpers import (
+    update_canvas_region, update_lower_border, highlight_commands, handle_tab,
+    adjust_input_height
+)
 from utils import (
     RedirectedStdout,
     debug_print,
@@ -43,8 +47,6 @@ threading.excepthook = thread_excepthook
 
 class AssistantApp:
     """The main application class for the Lokality GUI."""
-    SLASH_COMMANDS = SLASH_COMMANDS
-
     def __init__(self, root):
         self.root = root
         self.root.report_callback_exception = self.handle_tk_exception
@@ -59,7 +61,8 @@ class AssistantApp:
 
         # Load persistent toggles
         config.DEBUG = self.settings.get("debug", False)
-        self.state.show_info = self.settings.get("show_info", False)
+        self.state.ui_state.show_info = self.settings.get("show_info", False)
+        config.MODEL_NAME = self.settings.get("model_name", config.MODEL_NAME)
         if config.DEBUG:
             logger.setLevel(logging.DEBUG)
 
@@ -121,20 +124,30 @@ class AssistantApp:
     def _setup_ui(self):
         """Configures the main window layout and components."""
         self.root.grid_rowconfigure(0, weight=1)
-        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=0) # Sidebar column
+        self.root.grid_columnconfigure(1, weight=1) # Chat column
 
+        self._setup_sidebar()
         self._setup_chat_area()
         self.markdown_engine.text_widget = self.ui.chat.display
 
         self.ui.info_panel = InfoPanel(self.root, Theme, self.fonts)
-        self.ui.info_panel.show_info = self.state.show_info
-        self.ui.info_panel.grid(row=1, column=0, sticky="ew", padx=10, pady=0)
-        if not self.state.show_info:
+        self.ui.info_panel.show_info = self.state.ui_state.show_info
+        self.ui.info_panel.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=0)
+        if not self.state.ui_state.show_info:
             self.ui.info_panel.grid_remove()
 
         self._setup_input_area()
         self._bind_events()
         self._adjust_input_height()
+
+    def _setup_sidebar(self):
+        """Initializes the model selection sidebar."""
+        self.ui.sidebar.frame = tk.Frame(
+            self.root, bg=Theme.BG_COLOR, width=0, highlightthickness=0
+        )
+        self.ui.sidebar.frame.grid(row=0, column=0, sticky="nsew", padx=(10, 0), pady=(10, 7))
+        self.ui.sidebar.frame.grid_remove() # Hidden by default
 
     def _setup_chat_area(self):
         """Sets up the scrollable chat display area."""
@@ -142,7 +155,7 @@ class AssistantApp:
             self.root, bg=Theme.BG_COLOR, highlightthickness=0
         )
         self.ui.chat.canvas.grid(
-            row=0, column=0, sticky="nsew", padx=10, pady=(10, 7)
+            row=0, column=1, sticky="nsew", padx=10, pady=(10, 7)
         )
         self.ui.chat.bg_id = round_rectangle(
             self.ui.chat.canvas, (4, 4, 10, 10), radius=25,
@@ -234,7 +247,7 @@ class AssistantApp:
             height=line_h + 20
         )
         self.ui.input.canvas.grid(
-            row=2, column=0, sticky="ew", padx=10, pady=(7, 20)
+            row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=(7, 20)
         )
         self.ui.input.bg_id = round_rectangle(
             self.ui.input.canvas, (4, 4, 10, 10), radius=20,
@@ -306,18 +319,7 @@ class AssistantApp:
             self.state.process.active = None
 
     def _update_canvas_region(self, cfg: CanvasConfig):
-        """Unified helper to update rounded rectangles on resize."""
-        w, h = cfg.size
-        outline, line_w, fill = cfg.style
-        px, py = cfg.pad
-        cfg.canvas.delete(cfg.bg_id)
-        nbg = round_rectangle(cfg.canvas, (4, 4, w-4, h-4), radius=cfg.radius,
-                              outline=outline, width=line_w, fill=fill)
-        cfg.canvas.tag_lower(nbg)
-        cfg.canvas.itemconfig(cfg.win_id, width=max(1, w-(px*2)),
-                              height=max(1, h-(py*2)))
-        cfg.canvas.coords(cfg.win_id, px, py)
-        return nbg
+        return update_canvas_region(cfg)
 
     def _on_chat_canvas_configure(self, event):
         """Updates the chat area border on resize."""
@@ -333,6 +335,20 @@ class AssistantApp:
             pad=(12, 12)
         )
         self.ui.chat.bg_id = self._update_canvas_region(cfg)
+
+    def _on_sidebar_canvas_configure(self, event):
+        """Maintains the sidebar background shape on resize."""
+        w, h = event.width, event.height
+        cfg = CanvasConfig(
+            canvas=self.ui.sidebar.canvas,
+            bg_id=self.ui.sidebar.bg_id,
+            size=(w, h),
+            radius=25,
+            style=(Theme.ACCENT_COLOR, 6, Theme.INPUT_BG),
+            win_id=self.ui.sidebar.window_id,
+            pad=(12, 12)
+        )
+        self.ui.sidebar.bg_id = self._update_canvas_region(cfg)
 
     def _on_manual_scroll(self, _):
         """Disables auto-scroll when user interacts with the chat history."""
@@ -372,62 +388,14 @@ class AssistantApp:
             self._update_lower_border()
 
     def _adjust_input_height(self, _=None):
-        """Dynamically adjusts the input field height based on content."""
-        try:
-            if self.ui.input.field.winfo_width() <= 1:
-                new_h = 1
-            else:
-                content = self.ui.input.field.get("1.0", "end-1c")
-                if not content:
-                    new_h = 1
-                else:
-                    self.ui.input.field.update_idletasks()
-                    try:
-                        res = self.ui.input.field.count("1.0", "end", "displaylines")
-                        new_h = res[0] if res else 1
-                    except (tk.TclError, AttributeError):
-                        new_h = content.count('\n') + 1
+        adjust_input_height(self.ui.input)
 
-            new_h = min(max(new_h, 1), 8)
-            self.ui.input.field.config(height=new_h)
-            self.ui.input.field.update_idletasks()
-
-            total_h = self.ui.input.field.winfo_reqheight() + 20
-            if abs(int(self.ui.input.canvas.cget("height")) - total_h) > 2:
-                self.ui.input.canvas.config(height=total_h)
-                self._update_lower_border(total_h)
-        except tk.TclError:
-            pass
 
     def _update_lower_border(self, forced_h=None):
-        """Redraws the input area border."""
-        w = self.ui.input.canvas.winfo_width()
-        h = forced_h if forced_h is not None else self.ui.input.canvas.winfo_height()
-        if w < 10 or h < 10:
-            return
-
-        inner_h = self.ui.input.field.winfo_reqheight()
-        cfg = CanvasConfig(
-            canvas=self.ui.input.canvas,
-            bg_id=self.ui.input.bg_id,
-            size=(w, h),
-            radius=20,
-            style=(Theme.COMMAND_COLOR, 6, Theme.INPUT_BG),
-            win_id=self.ui.input.window_id,
-            pad=(8, (h - inner_h) / 2)
-        )
-        self.ui.input.bg_id = self._update_canvas_region(cfg)
+        self.ui.input.bg_id = update_lower_border(self.ui.input, forced_h)
 
     def _handle_tab(self, _):
-        """Handles Tab key for command completion (stub)."""
-        content = self.ui.input.field.get("1.0", tk.INSERT).strip()
-        if content.startswith("/"):
-            matches = [c[0] for c in self.SLASH_COMMANDS if c[0].startswith(content)]
-            if matches:
-                self.ui.input.field.delete("1.0", tk.INSERT)
-                self.ui.input.field.insert("1.0", min(matches, key=len))
-            return "break"
-        return None
+        return handle_tab(self.ui.input, SLASH_COMMANDS)
 
     def _handle_return(self, event):
         """Sends the message on Enter, inserts newline on Shift+Enter."""
@@ -440,24 +408,11 @@ class AssistantApp:
         """Triggers command highlighting and height adjustment."""
         if event and event.keysym in ("Shift_L", "Shift_R"):
             return
-        self._highlight_commands()
+        highlight_commands(self.ui.input, SLASH_COMMANDS)
         self._adjust_input_height()
 
     def _highlight_commands(self):
-        """Applies syntax highlighting to valid slash commands."""
-        self.ui.input.field.tag_remove("command_highlight", "1.0", tk.END)
-        content = self.ui.input.field.get("1.0", tk.END).strip()
-        if content.startswith("/"):
-            end_idx = content.find(" ")
-            if end_idx == -1:
-                end_idx = content.find("\n")
-
-            cmd = content[:end_idx] if end_idx != -1 else content
-            valid_cmds = [c[0] for c in self.SLASH_COMMANDS]
-
-            if cmd in valid_cmds:
-                tag_end = f"1.{end_idx}" if end_idx != -1 else "1.end"
-                self.ui.input.field.tag_add("command_highlight", "1.0", tag_end)
+        highlight_commands(self.ui.input, SLASH_COMMANDS)
 
     def send_message(self):
         """Validates input and initiates assistant processing."""
@@ -542,6 +497,7 @@ class AssistantApp:
                 '/clear': self._cmd_clear, '/debug': self._cmd_debug,
                 '/forget': self._cmd_forget, '/info': self._cmd_info,
                 '/help': self._cmd_help, '/exit': self._cmd_exit,
+                '/model': self._cmd_model,
                 'exit': self._cmd_exit, 'quit': self._cmd_exit
             }
             parts = user_input.lower().split()
@@ -558,15 +514,11 @@ class AssistantApp:
             def run_assistant():
                 try:
                     complexity = ComplexityScorer.analyze(user_input)
-                    p_params = complexity['params']
 
                     skip_search = complexity['level'] == ComplexityScorer.LEVEL_MINIMAL
                     ctx = self.state.assistant.decide_and_search(
-                        user_input, skip_llm=skip_search, options=p_params
+                        user_input, skip_llm=skip_search
                     )
-
-                    if ctx and p_params.get('num_ctx', 0) < 2048:
-                        p_params['num_ctx'] = ComplexityScorer.get_safe_context_size(2048)
 
                     self.state.assistant.update_system_prompt(user_input)
                     msgs = self._get_assistant_msgs(user_input, ctx)
@@ -613,9 +565,119 @@ class AssistantApp:
 
     def _cmd_help(self, _):
         logger.info("Help command invoked.")
-        lines = [f"    {c}\t{d}" for c, d in self.SLASH_COMMANDS]
+        lines = []
+        for cmd, desc in SLASH_COMMANDS:
+            if cmd == "/exit":
+                lines.append("")
+            lines.append(f"    {cmd}\t{desc}")
         print("Available Commands:\n" + "\n".join(lines))
         self.state.msg_queue.put(("separator", None, None))
+        self.state.msg_queue.put(("enable", None, None))
+
+    def _cmd_model(self, _):
+        """Displays the sidebar to switch the current Ollama model."""
+        if not self.state.assistant:
+            self.state.msg_queue.put(("enable", None, None))
+            return
+
+        if self.state.ui_state.sidebar_visible:
+            self._close_sidebar()
+            return
+
+        models = self.state.assistant.get_available_models()
+        if not models:
+            error_print("No models found in Ollama.")
+            self.state.msg_queue.put(("enable", None, None))
+            return
+
+        self._build_model_sidebar(models)
+
+    def _build_model_sidebar(self, models):
+        """Constructs the model selection UI components."""
+        for widget in self.ui.sidebar.frame.winfo_children():
+            widget.destroy()
+
+        self.state.ui_state.sidebar_visible = True
+        self.ui.sidebar.frame.grid()
+
+        header = tk.Frame(self.ui.sidebar.frame, bg=Theme.BG_COLOR)
+        header.pack(fill="x", padx=10, pady=(5, 0))
+        header.grid_columnconfigure(0, weight=1)
+
+        tk.Label(header, text="Models", font=self.fonts["h3"],
+                 bg=Theme.BG_COLOR, fg=Theme.FG_COLOR).grid(row=0, column=0)
+
+        tk.Button(header, text="<", command=self._close_sidebar, font=("Roboto", 24),
+                  bg=Theme.BG_COLOR, fg=Theme.SYSTEM_COLOR, borderwidth=0,
+                  highlightthickness=0, activebackground=Theme.BG_COLOR,
+                  activeforeground=Theme.FG_COLOR, cursor="hand2").grid(row=0, column=0, sticky="w")
+
+        self.ui.sidebar.canvas = tk.Canvas(
+            self.ui.sidebar.frame, bg=Theme.BG_COLOR, highlightthickness=0
+        )
+        self.ui.sidebar.canvas.pack(fill="both", expand=True, padx=10, pady=(2, 0))
+
+        self.ui.sidebar.bg_id = round_rectangle(
+            self.ui.sidebar.canvas, (4, 4, 10, 10), radius=25,
+            outline=Theme.ACCENT_COLOR, width=6, fill=Theme.INPUT_BG
+        )
+
+        inner = tk.Frame(self.ui.sidebar.canvas, bg=Theme.INPUT_BG)
+        self.ui.sidebar.window_id = self.ui.sidebar.canvas.create_window(
+            12, 12, anchor="nw", window=inner
+        )
+
+        self._create_model_listbox(inner, models)
+        self.ui.sidebar.canvas.bind("<Configure>", self._on_sidebar_canvas_configure)
+
+    def _create_model_listbox(self, parent, models):
+        """Creates and populates the model listbox."""
+        listbox = tk.Listbox(
+            parent, font=self.fonts["base"], bg=Theme.INPUT_BG,
+            fg=Theme.FG_COLOR, selectbackground=Theme.USER_COLOR,
+            selectforeground=Theme.BG_COLOR, borderwidth=0,
+            highlightthickness=0, activestyle='none', width=25
+        )
+        listbox.pack(side="left", fill="both", expand=True)
+
+        scrollbar = CustomScrollbar(parent, command=listbox.yview, bg=Theme.INPUT_BG)
+        scrollbar.pack(side="right", fill="y")
+        listbox.config(yscrollcommand=scrollbar.set)
+
+        curr = config.MODEL_NAME
+        for i, model in enumerate(models):
+            display_name = f"{model} (Current)" if model == curr else model
+            listbox.insert(tk.END, display_name)
+            if model == curr:
+                listbox.selection_set(i)
+                listbox.see(i)
+
+        def _confirm(_=None):
+            selection = listbox.curselection()
+            if selection:
+                new_model = models[selection[0]]
+                if new_model != config.MODEL_NAME:
+                    self._switch_model_logic(new_model)
+            self._close_sidebar()
+
+        listbox.bind("<Return>", _confirm)
+        listbox.bind("<Double-Button-1>", _confirm)
+        listbox.focus_set()
+
+    def _switch_model_logic(self, new_model):
+        """Handles the actual model switching process."""
+        info_print(f"Switching to model: {new_model}...")
+        self.state.assistant.switch_model(new_model)
+        self.settings.set("model_name", new_model)
+        info_print(f"Model switched to {new_model}. History cleared.")
+        self.markdown_engine.clear()
+        self.state.msg_queue.put(("clear", None, None))
+        self._update_info_display()
+
+    def _close_sidebar(self):
+        """Closes the model selection sidebar."""
+        self.state.ui_state.sidebar_visible = False
+        self.ui.sidebar.frame.grid_remove()
         self.state.msg_queue.put(("enable", None, None))
 
     def _cmd_bypass(self, user_input):
@@ -836,8 +898,8 @@ class AssistantApp:
             self._display_message("", tag, final=True)
             self._update_info_display()
         elif action == "toggle_info":
-            self.state.show_info = self.ui.info_panel.toggle()
-            self.settings.set("show_info", self.state.show_info)
+            self.state.ui_state.show_info = self.ui.info_panel.toggle()
+            self.settings.set("show_info", self.state.ui_state.show_info)
             self._update_info_display()
         elif action == "update_info_ui":
             self.ui.info_panel.update_stats(content)
@@ -850,7 +912,7 @@ class AssistantApp:
 
     def _update_info_display(self):
         """Fetches and displays model info in the info panel."""
-        if not self.state.show_info or not self.state.assistant:
+        if not self.state.ui_state.show_info or not self.state.assistant:
             return
 
         def _fetch():

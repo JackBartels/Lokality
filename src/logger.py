@@ -11,7 +11,7 @@ import config
 
 def cleanup_logs(log_dir):
     """
-    Removes logs older than MAX_LOG_AGE_DAYS if there are more than 
+    Removes logs older than MAX_LOG_AGE_DAYS if there are more than
     MIN_LOGS_FOR_CLEANUP files. Also caps total log files at MAX_LOG_FILES.
     """
     log_files = glob.glob(os.path.join(log_dir, "*.txt"))

@@ -8,8 +8,6 @@ import re
 import ollama
 
 import config
-from complexity_scorer import ComplexityScorer
-from config import MEMORY_EXTRACTION_MAX_TOKENS, CONTEXT_WINDOW_SIZE
 from utils import debug_print, error_print, get_ollama_client
 
 # client removed from here
@@ -123,9 +121,6 @@ class MemoryManager:
         )
 
         try:
-            # VRAM Safety check for context size
-            safe_ctx = ComplexityScorer.get_safe_context_size(CONTEXT_WINDOW_SIZE)
-
             res = get_ollama_client().chat(
                 model=config.MODEL_NAME,
                 messages=[
@@ -134,8 +129,6 @@ class MemoryManager:
                 ],
                 format="json",
                 options={
-                    "num_predict": MEMORY_EXTRACTION_MAX_TOKENS,
-                    "num_ctx": safe_ctx,
                     "temperature": 0.0
                 }
             )

@@ -28,13 +28,19 @@ class ProcessState:
     stop_generation: bool = False
 
 @dataclass
+class UIState:
+    """Holds UI visibility state."""
+    show_info: bool = False
+    sidebar_visible: bool = False
+
+@dataclass
 class AppState:
     """Holds the application state."""
     assistant: Optional[Any] = None
     process: ProcessState = field(default_factory=ProcessState)
     auto_scroll: bool = True
     response: ResponseState = field(default_factory=ResponseState)
-    show_info: bool = False
+    ui_state: UIState = field(default_factory=UIState)
     msg_queue: queue.Queue = field(default_factory=queue.Queue)
     indicator: IndicatorState = field(default_factory=IndicatorState)
 
@@ -59,11 +65,20 @@ class InputUI:
     field: Optional[tk.Text] = None
 
 @dataclass
+class SidebarUI:
+    """Holds sidebar UI component references."""
+    frame: Optional[tk.Frame] = None
+    canvas: Optional[tk.Canvas] = None
+    bg_id: Optional[int] = None
+    window_id: Optional[int] = None
+
+@dataclass
 class AppUI:
     """Holds UI component references."""
     chat: ChatUI = field(default_factory=ChatUI)
     input: InputUI = field(default_factory=InputUI)
     info_panel: Optional[InfoPanel] = None
+    sidebar: SidebarUI = field(default_factory=SidebarUI)
     tooltip_window: Optional[tk.Toplevel] = None
 
 @dataclass
@@ -84,5 +99,6 @@ SLASH_COMMANDS = [
     ["/forget", "Reset long-term memory"],
     ["/help", "Show this help message"],
     ["/info", "Toggle model & system information"],
+    ["/model", "Switch the current Ollama model"],
     ["/exit", "Exit the application"]
 ]
