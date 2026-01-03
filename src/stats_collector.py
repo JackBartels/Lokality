@@ -4,7 +4,7 @@ Monitors model resource usage and estimates context window consumption.
 """
 import ollama
 
-from config import MODEL_NAME
+import config
 from logger import logger
 from utils import debug_print, get_ollama_client
 
@@ -34,7 +34,7 @@ def _get_resource_usage(stats):
         ps = get_ollama_client().ps()
         models_list = getattr(ps, 'models', ps)
         for m in models_list:
-            if m.model.split(":")[0] in MODEL_NAME or MODEL_NAME in m.model:
+            if m.model.split(":")[0] in config.MODEL_NAME or config.MODEL_NAME in m.model:
                 vram_bytes = getattr(m, 'size_vram', 0)
                 total_bytes = getattr(m, 'size', 0)
                 stats["vram_mb"] = vram_bytes // (1024 * 1024)
@@ -48,7 +48,7 @@ def _get_resource_usage(stats):
 def get_model_info(memory_store, system_prompt, messages):
     """Gathers statistics about the model and system."""
     stats = {
-        "model": MODEL_NAME,
+        "model": config.MODEL_NAME,
         "context_pct": 0,
         "memory_entries": memory_store.get_fact_count(),
         "ram_mb": 0,
@@ -59,7 +59,7 @@ def get_model_info(memory_store, system_prompt, messages):
         _get_resource_usage(stats)
 
         # Context estimation
-        show = get_ollama_client().show(MODEL_NAME)
+        show = get_ollama_client().show(config.MODEL_NAME)
         show_dict = show.model_dump()
         max_ctx = 8192 # Default fallback
         model_info = show_dict.get('modelinfo', {})

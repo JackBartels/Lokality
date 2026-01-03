@@ -40,11 +40,13 @@ class TestSettings(unittest.TestCase):
         settings = Settings()
         settings.set("debug", True)
         settings.set("show_info", True)
+        settings.set("model_name", "test-model")
 
         # Create a new settings object to force reload
         new_settings = Settings()
         self.assertTrue(new_settings.get("debug"))
         self.assertTrue(new_settings.get("show_info"))
+        self.assertEqual(new_settings.get("model_name"), "test-model")
 
     def test_invalid_json(self):
         """Test behavior with invalid JSON in settings file."""

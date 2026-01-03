@@ -8,12 +8,10 @@ from memory_manager import MemoryManager
 class TestMemoryManager(unittest.TestCase):
     """Test suite for MemoryManager."""
 
-    @patch('memory_manager.ComplexityScorer.get_safe_context_size')
     @patch('memory_manager.get_ollama_client')
-    def test_extract_facts_add(self, mock_get_client, mock_ctx):
+    def test_extract_facts_add(self, mock_get_client):
         """Test extracting a single fact addition."""
         mock_client = mock_get_client.return_value
-        mock_ctx.return_value = 2048
         # Mock LLM response for fact extraction
         mock_client.chat.return_value = {
             'message': {
@@ -29,12 +27,10 @@ class TestMemoryManager(unittest.TestCase):
         self.assertEqual(ops[0]['op'], 'add')
         self.assertEqual(ops[0]['fact'], 'Lives in Paris')
 
-    @patch('memory_manager.ComplexityScorer.get_safe_context_size')
     @patch('memory_manager.get_ollama_client')
-    def test_extract_facts_no_change(self, mock_get_client, mock_ctx):
+    def test_extract_facts_no_change(self, mock_get_client):
         """Test when no facts are extracted."""
         mock_client = mock_get_client.return_value
-        mock_ctx.return_value = 2048
         mock_client.chat.return_value = {
             'message': {
                 'content': '{"operations": []}'
@@ -44,12 +40,10 @@ class TestMemoryManager(unittest.TestCase):
         ops = MemoryManager.extract_facts("Hello", "Hi there!", "")
         self.assertEqual(len(ops), 0)
 
-    @patch('memory_manager.ComplexityScorer.get_safe_context_size')
     @patch('memory_manager.get_ollama_client')
-    def test_extract_facts_multiple(self, mock_get_client, mock_ctx):
+    def test_extract_facts_multiple(self, mock_get_client):
         """Test extracting multiple facts."""
         mock_client = mock_get_client.return_value
-        mock_ctx.return_value = 2048
         # Mock LLM response for multiple operations
         mock_client.chat.return_value = {
             'message': {

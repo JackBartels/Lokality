@@ -26,10 +26,6 @@ class BaseAssistantTest(unittest.TestCase):
         self.mocks['get_client'] = self.patchers['client'].start()
         self.mocks['client'] = self.mocks['get_client'].return_value
         # Also patch it in other modules just in case
-        self.patchers['client_cs'] = patch(
-            'complexity_scorer.get_ollama_client', new=self.mocks['get_client']
-        )
-        self.patchers['client_cs'].start()
         self.patchers['client_mm'] = patch(
             'memory_manager.get_ollama_client', new=self.mocks['get_client']
         )
@@ -38,11 +34,6 @@ class BaseAssistantTest(unittest.TestCase):
             'stats_collector.get_ollama_client', new=self.mocks['get_client']
         )
         self.patchers['client_sc'].start()
-
-        # ComplexityScorer patch
-        self.patchers['ctx'] = patch('local_assistant.ComplexityScorer.get_safe_context_size')
-        self.mocks['ctx'] = self.patchers['ctx'].start()
-        self.mocks['ctx'].return_value = 2048
 
         # Mock datetime for determinism
         self.patchers['datetime'] = patch('local_assistant.datetime')

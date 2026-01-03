@@ -4,13 +4,9 @@ Adjusts LLM parameters dynamically based on predicted effort.
 """
 import math
 import re
-import time
 from typing import Dict, Any
 
-import ollama
-
-import config
-from utils import get_system_resources, debug_print, get_ollama_client
+from utils import debug_print
 
 class ComplexityScorer:
     """
@@ -61,48 +57,6 @@ class ComplexityScorer:
     }
 
     @staticmethod
-    def _get_model_max_ctx() -> int:
-        """Retrieves the model's native context window from Ollama."""
-        model_name = config.MODEL_NAME
-        if model_name in ComplexityScorer._model_context_cache:
-            return ComplexityScorer._model_context_cache[model_name]
-
-        try:
-            info = get_ollama_client().show(model_name).model_dump()
-            model_info = info.get('modelinfo', {})
-            for key, val in model_info.items():
-                if 'context_length' in key:
-                    ComplexityScorer._model_context_cache[model_name] = val
-                    return val
-        except (AttributeError, ollama.ResponseError):
-            pass
-        return 8192 # Default safe fallback
-
-    @staticmethod
-    def _get_loaded_model_size_mb() -> int:
-        """Estimates the size of the currently loaded model, cached for 60s."""
-        now = time.time()
-        if now < ComplexityScorer._model_size_cache["expires"]:
-            return ComplexityScorer._model_size_cache["size"]
-
-        try:
-            ps = get_ollama_client().ps()
-            # ps is a list of models or a structure with 'models' attribute
-            models_list = getattr(ps, 'models', ps)
-            for m in models_list:
-                if (m.model.split(":")[0] in config.MODEL_NAME or
-                        config.MODEL_NAME in m.model):
-                    size_mb = m.size // (1024 * 1024)
-                    ComplexityScorer._model_size_cache = {
-                        "size": size_mb,
-                        "expires": now + 60
-                    }
-                    return size_mb
-        except (AttributeError, ollama.ResponseError):
-            pass
-        return 0
-
-    @staticmethod
     def _calculate_ari(text: str) -> float:
         """Calculates ARI to gauge the linguistic sophistication of the request."""
         characters = len(re.sub(r'[^a-zA-Z0-9]', '', text))
@@ -127,26 +81,6 @@ class ComplexityScorer:
         if re.search(r'^\s*[-*•]\s+', text, re.MULTILINE):
             score += 0.4
         return min(1.0, score)
-
-    @staticmethod
-    def get_safe_context_size(requested_ctx: int) -> int:
-        """
-        Calculates a VRAM-safe context window size based on system resources.
-        """
-        model_max = ComplexityScorer._get_model_max_ctx()
-        model_size_mb = ComplexityScorer._get_loaded_model_size_mb()
-        _, vram_mb = get_system_resources()
-
-        # Start with Total VRAM (fallback to 2048 if detection fails)
-        total_vram = vram_mb or 2048
-        available_headroom = max(0, total_vram - model_size_mb)
-        safe_headroom = max(0, available_headroom - 256)
-        capped_headroom = safe_headroom * 0.7
-
-        # Assume 0.25MB per token for KV cache + overhead
-        vram_tokens_limit = int(capped_headroom / 0.25)
-
-        return max(512, min(requested_ctx, model_max, vram_tokens_limit))
 
     @staticmethod
     def _get_complexity_metrics(user_input: str):
@@ -200,7 +134,6 @@ class ComplexityScorer:
             return {
                 "score": 0.0, "creativity": 0.0, "level": "MINIMAL",
                 "params": {
-                    "num_ctx": 512, "num_predict": -1,
                     "temperature": 0.1, "top_p": 0.4
                 }
             }
@@ -213,18 +146,15 @@ class ComplexityScorer:
         )
 
         if score <= 0.02:
-            level, requested_ctx, base_penalty = ComplexityScorer.LEVEL_MINIMAL, 512, 1.05
+            level, base_penalty = ComplexityScorer.LEVEL_MINIMAL, 1.05
         elif score < 0.15:
-            level, requested_ctx, base_penalty = ComplexityScorer.LEVEL_SIMPLE, 2048, 1.1
+            level, base_penalty = ComplexityScorer.LEVEL_SIMPLE, 1.1
         elif score < 0.45:
-            level, requested_ctx, base_penalty = ComplexityScorer.LEVEL_MODERATE, 3072, 1.15
+            level, base_penalty = ComplexityScorer.LEVEL_MODERATE, 1.15
         else:
-            level, requested_ctx, base_penalty = ComplexityScorer.LEVEL_COMPLEX, 4096, 1.2
-
-        final_ctx = ComplexityScorer.get_safe_context_size(requested_ctx)
+            level, base_penalty = ComplexityScorer.LEVEL_COMPLEX, 1.2
 
         params = {
-            "num_ctx": final_ctx, "num_predict": -1,
             "temperature": round(0.1 + (creativity * 0.7), 2),
             "top_p": round(0.4 + (creativity * 0.55), 2),
             "min_p": round(creativity * 0.1, 2),
@@ -236,5 +166,11 @@ class ComplexityScorer:
         return {
             "score": score, "creativity": creativity,
             "level": level, "params": params,
-            "details": f"C:{score} Cr:{creativity} (CTX:{final_ctx})"
+            "details": f"C:{score} Cr:{creativity}"
         }
+
+    @staticmethod
+    def is_creative(user_input: str) -> bool:
+        """Determines if the prompt has a strong creative intent."""
+        _, creativity, _ = ComplexityScorer._get_complexity_metrics(user_input)
+        return creativity > 0.5

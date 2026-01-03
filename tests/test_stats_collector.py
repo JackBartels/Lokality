@@ -37,12 +37,12 @@ class TestStatsCollector(unittest.TestCase):
         mock_client.show.return_value = mock_show
 
         # Change config.MODEL_NAME for test
-        with patch('stats_collector.MODEL_NAME', 'llama3'):
+        with patch('config.MODEL_NAME', 'llama3:latest'):
             stats = get_model_info(
                 mock_memory, "System prompt", [{"content": "User message"}]
             )
 
-            self.assertEqual(stats['model'], 'llama3')
+            self.assertEqual(stats['model'], 'llama3:latest')
             self.assertEqual(stats['memory_entries'], 10)
             self.assertEqual(stats['vram_mb'], 4000)
             self.assertEqual(stats['ram_mb'], 1000)

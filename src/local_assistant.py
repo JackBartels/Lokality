@@ -10,10 +10,7 @@ import threading
 import ollama
 
 import config
-from complexity_scorer import ComplexityScorer
 from config import (
-    SEARCH_DECISION_MAX_TOKENS,
-    CONTEXT_WINDOW_SIZE,
     DEFAULT_MODELS
 )
 from logger import logger
@@ -112,8 +109,15 @@ class LocalChatAssistant:
     def _ensure_model_available(self):
         """Pulls a suitable default model if none are found."""
         try:
-            models = get_ollama_client().list().get('models', [])
-            if models:
+            models_res = get_ollama_client().list()
+            installed_models = [m.model for m in models_res.models]
+
+            if config.MODEL_NAME in installed_models:
+                return
+
+            if installed_models:
+                # If current MODEL_NAME not found but others are, just use the first available one
+                config.MODEL_NAME = installed_models[0]
                 return
 
             info_print("[*] No models found. Detecting system resources...")
@@ -234,7 +238,7 @@ class LocalChatAssistant:
             return True
         return False
 
-    def _get_search_decision(self, user_input, options):
+    def _get_search_decision(self, user_input):
         """Asks the model if a web search is needed."""
         now = datetime.now()
         recent_context = "\n".join(
@@ -253,12 +257,7 @@ class LocalChatAssistant:
             "OR {\"action\": \"done\"}"
         )
         gen_options = {
-            "num_predict": SEARCH_DECISION_MAX_TOKENS,
             "temperature": 0.0,
-            "num_ctx": options.get(
-                "num_ctx",
-                ComplexityScorer.get_safe_context_size(CONTEXT_WINDOW_SIZE)
-            )
         }
         res = get_ollama_client().generate(
             model=config.MODEL_NAME, prompt=decision_prompt,
@@ -277,13 +276,11 @@ class LocalChatAssistant:
             "Return JSON: {\"action\": \"scrape\", \"url\": \"...\"} "
             "OR {\"action\": \"done\"}"
         )
-        scrape_ctx = ComplexityScorer.get_safe_context_size(4096)
         debug_print("[*] Scrape Decision: Prompting model...")
         scrape_res = get_ollama_client().generate(
             model=config.MODEL_NAME, prompt=scrape_prompt, format="json",
             options={
-                "num_predict": SEARCH_DECISION_MAX_TOKENS,
-                "temperature": 0.0, "num_ctx": scrape_ctx
+                "temperature": 0.0
             }
         )
         scrape_data = json.loads(scrape_res['response'].strip())
@@ -301,18 +298,16 @@ class LocalChatAssistant:
             f"RAW CONTENT FROM {url}:\n{raw_text}\n\n"
             "TASK: Extract ONLY the facts that help answer 'WHY WE SEARCHED'."
         )
-        distill_ctx = ComplexityScorer.get_safe_context_size(4096)
         distill_res = get_ollama_client().generate(
             model=config.MODEL_NAME, prompt=distill_prompt,
             options={
-                "num_predict": 500, "temperature": 0.0,
-                "num_ctx": distill_ctx
+                "temperature": 0.0,
             }
         )
         info = distill_res['response'].strip()
         return f"\n\n--- RELEVANT DATA FROM {url} ---\n{info}"
 
-    def decide_and_search(self, user_input, skip_llm=False, options=None):
+    def decide_and_search(self, user_input, skip_llm=False):
         """Determines if search is needed and executes it."""
         filler = {"hi", "hello", "hey", "thanks", "ok", "yes", "no"}
         clean_in = re.sub(r'[^a-z\s]', '', user_input.lower()).strip()
@@ -320,7 +315,7 @@ class LocalChatAssistant:
             return None
 
         try:
-            data = self._get_search_decision(user_input, options or {})
+            data = self._get_search_decision(user_input)
             if data and data.get("action") == "search":
                 return self._perform_search(user_input, data)
         except (ollama.ResponseError, json.JSONDecodeError, AttributeError) as exc:
@@ -363,3 +358,22 @@ class LocalChatAssistant:
         return get_model_info(
             self.memory, self.system_prompt, self.messages
         )
+
+    def get_available_models(self):
+        """Retrieves a list of available models from Ollama."""
+        try:
+            models_res = get_ollama_client().list()
+            # ListResponse object has a 'models' attribute which is a list of Model objects
+            # Each Model object has a 'model' attribute (the name)
+            return [m.model for m in models_res.models]
+        except (ollama.ResponseError, AttributeError, ConnectionError) as exc:
+            error_print(f"Failed to list models: {exc}")
+            return []
+
+    def switch_model(self, new_model_name):
+        """Switches the current model and clears short-term memory."""
+        info_print(f"[*] Switching model to: {new_model_name}")
+        config.MODEL_NAME = new_model_name
+        self.messages = []  # Clear short-term memory as requested
+        self._wake_model()
+        return True
