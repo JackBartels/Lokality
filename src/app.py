@@ -29,8 +29,9 @@ from app_state import AppState, AppUI, CanvasConfig, SLASH_COMMANDS
 from ui_components import CustomScrollbar, InfoPanel
 from ui_helpers import (
     update_canvas_region, update_lower_border, highlight_commands, handle_tab,
-    adjust_input_height
+    adjust_input_height, configure_chat_tags, insert_chat_separator
 )
+from ui_dialogs import show_forget_dialog
 from utils import (
     RedirectedStdout,
     debug_print,
@@ -274,29 +275,7 @@ class AssistantApp:
 
     def _configure_tags(self):
         """Sets up text tags for different message types."""
-        cfg = self.ui.chat.display.tag_config
-        cfg("user", foreground=Theme.USER_COLOR, font=self.fonts["bold"])
-        cfg("assistant", foreground=Theme.FG_COLOR, font=self.fonts["base"])
-        cfg("indicator", foreground=Theme.INDICATOR_COLOR, font=self.fonts["indicator"])
-        cfg("system", foreground=Theme.SYSTEM_COLOR, font=self.fonts["small"],
-            tabs=("240",))
-        cfg("error", foreground=Theme.ERROR_COLOR)
-        cfg("cancelled", foreground=Theme.CANCELLED_COLOR, font=self.fonts["bold"])
-        cfg("md_bold", font=self.fonts["bold"])
-        cfg("md_italic", font=self.fonts["italic"])
-        cfg("md_bold_italic", font=self.fonts["bold_italic"])
-        cfg("md_sub", font=self.fonts["small_base"], offset=-2)
-        cfg("md_sup", font=self.fonts["small_base"], offset=4)
-        cfg("md_strikethrough", overstrike=True)
-        cfg("md_code", font=self.fonts["code"], background=Theme.CODE_BG,
-            foreground=Theme.CODE_FG)
-        cfg("md_h1", font=self.fonts["h1"], spacing1=10, spacing3=5)
-        cfg("md_h2", font=self.fonts["h2"], spacing1=8, spacing3=4)
-        cfg("md_h3", font=self.fonts["h3"], spacing1=6, spacing3=3)
-        cfg("md_link", foreground=Theme.LINK_COLOR)
-        cfg("md_quote", font=self.fonts["italic"], foreground=Theme.SYSTEM_COLOR,
-            lmargin1=40, lmargin2=40)
-        cfg("md_quote_bar", foreground=Theme.ACCENT_COLOR, font=self.fonts["bold"])
+        configure_chat_tags(self.ui.chat.display, Theme, self.fonts)
 
     def _bind_events(self):
         """Binds GUI events to their respective handlers."""
@@ -546,9 +525,24 @@ class AssistantApp:
         self.state.msg_queue.put(("enable", None, None))
 
     def _cmd_forget(self, _):
+        """Initiates the confirmation for clearing long-term memory."""
+        if self.settings.get("skip_forget_confirmation"):
+            self._finalize_forget()
+            return
+
+        show_forget_dialog(
+            self.root, self.fonts, self.settings,
+            on_confirm=self._finalize_forget,
+            on_cancel=lambda: self.state.msg_queue.put(("enable", None, None))
+        )
+
+    def _finalize_forget(self):
+        """Actually clears the long-term memory."""
         if self.state.assistant:
             info_print("Requesting to forget long-term memory...")
             self.state.assistant.clear_long_term_memory()
+            # Issue #52: Immediately reset long term memory rows count in info panel
+            self._update_info_display()
         self.state.msg_queue.put(("enable", None, None))
 
     def _cmd_debug(self, _):
@@ -810,32 +804,7 @@ class AssistantApp:
 
     def _insert_separator(self, height=25):
         """Inserts a thematic separator in the chat."""
-        try:
-            # Ensure separator starts on a new line
-            if self.ui.chat.display.index("end-1c") != "1.0":
-                if self.ui.chat.display.get("end-2c", "end-1c") != "\n":
-                    self.ui.chat.display.insert("end-1c", "\n")
-
-            w = max(600, self.ui.chat.display.winfo_width() - 40)
-            canv = tk.Canvas(self.ui.chat.display, bg=Theme.BG_COLOR, height=height,
-                             highlightthickness=0, width=w)
-            canv.create_line(10, height//2, w-10, height//2, fill=Theme.SEPARATOR_COLOR)
-
-            def _on_mousewheel(event):
-                self.ui.chat.display.yview_scroll(int(-1*(event.delta/120)), "units")
-            def _on_linux_up(_):
-                self.ui.chat.display.yview_scroll(-1, "units")
-            def _on_linux_down(_):
-                self.ui.chat.display.yview_scroll(1, "units")
-
-            canv.bind("<MouseWheel>", _on_mousewheel)
-            canv.bind("<Button-4>", _on_linux_up)
-            canv.bind("<Button-5>", _on_linux_down)
-
-            self.ui.chat.display.window_create("end-1c", window=canv)
-            self.ui.chat.display.insert("end-1c", "\n")
-        except tk.TclError:
-            self.ui.chat.display.insert("end-1c", "-"*20 + "\n")
+        insert_chat_separator(self.ui.chat.display, Theme, height=height)
 
     def _handle_tooltip(self, _, url):
         """Displays a tooltip for links."""

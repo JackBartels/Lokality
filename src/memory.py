@@ -56,6 +56,7 @@ class MemoryStore:
 
         self._conn = None
         self._lock = threading.Lock()
+        self.clear_count = 0
         self._init_db()
 
     def _init_db(self):
@@ -275,6 +276,7 @@ class MemoryStore:
         """Deletes the database files and re-initializes."""
         try:
             self.close()
+            self.clear_count += 1
             for ext in ["", "-wal", "-shm"]:
                 path = self.db_path + ext
                 if os.path.exists(path):

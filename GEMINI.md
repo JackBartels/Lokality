@@ -60,7 +60,7 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 ## Project Structure
 
 - `src/`: Refactored into specialized modules.
-  - `app.py`: Main entry point and GUI orchestration. Consolidated process management and dispatcher-based queue polling.
+  - `app.py`: Main entry point and GUI orchestration. Maintained for readability and modularity.
   - `app_state.py`: Centralized state management using dataclasses for UI components, process status, and response handling.
   - `complexity_scorer.py`: Analyzes user input to dynamically adjust model parameters (context window, temperature, penalties) based on predicted complexity and creativity.
   - `config.py`: Global constants.
@@ -70,11 +70,13 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
   - `settings.py`: Handles loading and saving of persistent application settings.
   - `shell_integration.py`: PTY-based logic for the direct Ollama bypass.
   - `local_assistant.py`: Core logic for conversation management and system prompt templating.
-  - `memory.py`: Low-level SQLite database interface with FTS5 triggers.
+  - `memory.py`: Low-level SQLite database interface with FTS5 triggers. Features state-tracking to prevent race conditions during memory clearing.
   - `memory_manager.py`: LLM-driven fact extraction with strict transient filtering.
   - `search_engine.py`: DuckDuckGo search integration.
   - `stats_collector.py`: Resource monitoring and context estimation.
-  - `ui_components.py`: Custom Tkinter widgets with optimized layout and coordinate calculations.
+  - `ui_components.py`: Custom Tkinter widgets (Scrollbars, InfoPanel) with optimized layout.
+  - `ui_dialogs.py`: Modular dialog windows (e.g., confirmation for clearing memory).
+  - `ui_helpers.py`: Shared GUI utilities for syntax highlighting, input height adjustment, and chat tag configuration.
   - `utils.py`: Shared utilities (rounded rectangles, ANSI stripping, environment health checks).
 - `res/`: Persistent data.
   - `memory.db`: The SQLite database for long-term memory.
@@ -89,5 +91,6 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 - **Prompt Stability**: Model prompts and instructions should never be modified as part of refactors, except for formatting changes.
 - **Code Quality**: Strict adherence to Pylint standards. A perfect **10.00/10** score is required. Disabling Pylint warnings via comments (e.g., `# pylint: disable=...`) is **STRICTLY FORBIDDEN**. Code must be refactored to comply with rules and best practices.
 - **Testing**: All changes must be verified with the test suite: `PYTHONPATH=src .venv/bin/python -m unittest discover tests`.
+- **Documentation**: `@README.md` must strictly contain information relevant to the user (features, commands, installation). Technical backend details like testing instructions, CI/CD workflows, or architectural internals should be kept in `@GEMINI.md` or other development-focused files.
 - **GitHub Interaction**: Always use `gh` commands when interacting with GitHub (PRs, issues, repository metadata, etc.).
 - **Git & Version Control**: NEVER execute `git commit` or any command that modifies the commit history unless explicitly instructed to do so by the user for a specific set of changes. Preliminary staging (`git add`) is acceptable for preparation, but final commits are user-gated.
