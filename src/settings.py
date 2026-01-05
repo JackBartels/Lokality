@@ -12,7 +12,8 @@ class Settings:
     def __init__(self):
         self.settings = {
             "debug": False,
-            "show_info": False
+            "show_info": False,
+            "skip_forget_confirmation": False
         }
         self.load()
 

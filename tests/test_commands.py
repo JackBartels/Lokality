@@ -14,6 +14,7 @@ class TestCommands(unittest.TestCase):
         # Create patchers
         self.patchers = [
             patch('app.tk.Tk'),
+            patch('app.tk.Toplevel'),
             patch('app.tk.Canvas'),
             patch('app.tk.Text'),
             patch('app.tk.Frame'),
@@ -28,23 +29,38 @@ class TestCommands(unittest.TestCase):
         # Start all patchers and get mocks
         mocks = [p.start() for p in self.patchers]
 
-        # Configure Text mock (index 2)
-        mock_text_inst = mocks[2].return_value
+        # Configure Text mock (index 3)
+        mock_text_inst = mocks[3].return_value
         mock_text_inst.winfo_width.return_value = 100
         mock_text_inst.winfo_height.return_value = 100
         mock_text_inst.winfo_reqheight.return_value = 20
         mock_text_inst.count.return_value = [1]
         mock_text_inst.get.return_value = ""
 
-        # Configure Canvas mock (index 1)
-        mock_canvas_inst = mocks[1].return_value
+        # Configure Canvas mock (index 2)
+        mock_canvas_inst = mocks[2].return_value
         mock_canvas_inst.winfo_width.return_value = 100
         mock_canvas_inst.winfo_height.return_value = 100
 
         # Tk mock (index 0)
         root = mocks[0].return_value
+        # Toplevel mock (index 1)
+        self.mock_toplevel = mocks[1]
 
-        self.app = AssistantApp(root)
+        with patch('app.Settings') as mock_settings:
+            # We'll use a real dict to back it for convenience in tests.
+            self.test_settings_dict = {
+                "debug": config.DEBUG,
+                "show_info": False,
+                "skip_forget_confirmation": False
+            }
+            mock_inst = mock_settings.return_value
+            mock_inst.get.side_effect = self.test_settings_dict.get
+            mock_inst.set.side_effect = self.test_settings_dict.__setitem__
+
+            self.app = AssistantApp(root)
+            self.app.settings = mock_inst
+
         # Manually trigger assistant initialization with a mock
         self.app.state.assistant = MagicMock()
         self.app.state.assistant.messages = []
@@ -71,9 +87,19 @@ class TestCommands(unittest.TestCase):
         self.assertIn("enable", queue_actions)
 
     def test_command_forget_logic(self):
-        """Test the /forget command."""
-        # Verify that /forget calls assistant.clear_long_term_memory
+        """Test the /forget command with popup."""
+        # 1. Test popup appears when setting is False
+        self.test_settings_dict["skip_forget_confirmation"] = False
         self.app.process_input("/forget")
+        self.mock_toplevel.assert_called_once()
+        self.app.state.assistant.clear_long_term_memory.assert_not_called()
+
+        # 2. Test direct call when setting is True
+        self.mock_toplevel.reset_mock()
+        self.app.state.assistant.clear_long_term_memory.reset_mock()
+        self.test_settings_dict["skip_forget_confirmation"] = True
+        self.app.process_input("/forget")
+        self.mock_toplevel.assert_not_called()
         self.app.state.assistant.clear_long_term_memory.assert_called_once()
 
         queue_actions = []

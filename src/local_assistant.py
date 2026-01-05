@@ -172,6 +172,7 @@ class LocalChatAssistant:
     def perform_memory_update(self, user_input, assistant_response):
         """Extracts and commits new facts to the memory store."""
         debug_print("[*] Memory: Processing turn...")
+        start_clear_count = self.memory.clear_count
         updated = False
         try:
             filler = {
@@ -189,11 +190,22 @@ class LocalChatAssistant:
                     user_input, assistant_response, fact_context
                 )
 
+                if self.memory.clear_count != start_clear_count:
+                    debug_print(
+                        "[*] Memory: Aborting update - memory was cleared during extraction."
+                    )
+                    return
+
                 for op in [o for o in ops if isinstance(o, dict)]:
                     if self._apply_memory_op(op, all_facts):
                         updated = True
 
                 if updated:
+                    if self.memory.clear_count != start_clear_count:
+                        debug_print(
+                            "[*] Memory: Aborting commit - memory was cleared during processing."
+                        )
+                        return
                     self._cached_prompt = None
                     self.update_system_prompt(user_input)
         except (ollama.ResponseError, RuntimeError, ValueError) as exc:

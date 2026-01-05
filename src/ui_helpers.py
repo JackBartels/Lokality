@@ -93,3 +93,58 @@ def adjust_input_height(ui_input):
             ui_input.bg_id = update_lower_border(ui_input, total_h)
     except tk.TclError:
         pass
+
+def configure_chat_tags(text_widget, theme, fonts):
+    """Sets up text tags for different message types."""
+    cfg = text_widget.tag_config
+    cfg("user", foreground=theme.USER_COLOR, font=fonts["bold"])
+    cfg("assistant", foreground=theme.FG_COLOR, font=fonts["base"])
+    cfg("indicator", foreground=theme.INDICATOR_COLOR, font=fonts["indicator"])
+    cfg("system", foreground=theme.SYSTEM_COLOR, font=fonts["small"],
+        tabs=("240",))
+    cfg("error", foreground=theme.ERROR_COLOR)
+    cfg("cancelled", foreground=theme.CANCELLED_COLOR, font=fonts["bold"])
+    cfg("md_bold", font=fonts["bold"])
+    cfg("md_italic", font=fonts["italic"])
+    cfg("md_bold_italic", font=fonts["bold_italic"])
+    cfg("md_sub", font=fonts["small_base"], offset=-2)
+    cfg("md_sup", font=fonts["small_base"], offset=4)
+    cfg("md_strikethrough", overstrike=True)
+    cfg("md_code", font=fonts["code"], background=theme.CODE_BG,
+        foreground=theme.CODE_FG)
+    cfg("md_h1", font=fonts["h1"], spacing1=10, spacing3=5)
+    cfg("md_h2", font=fonts["h2"], spacing1=8, spacing3=4)
+    cfg("md_h3", font=fonts["h3"], spacing1=6, spacing3=3)
+    cfg("md_link", foreground=theme.LINK_COLOR)
+    cfg("md_quote", font=fonts["italic"], foreground=theme.SYSTEM_COLOR,
+        lmargin1=40, lmargin2=40)
+    cfg("md_quote_bar", foreground=theme.ACCENT_COLOR, font=fonts["bold"])
+
+def insert_chat_separator(text_widget, theme, height=25):
+    """Inserts a thematic separator in the chat."""
+    try:
+        # Ensure separator starts on a new line
+        if text_widget.index("end-1c") != "1.0":
+            if text_widget.get("end-2c", "end-1c") != "\n":
+                text_widget.insert("end-1c", "\n")
+
+        w = max(600, text_widget.winfo_width() - 40)
+        canv = tk.Canvas(text_widget, bg=theme.BG_COLOR, height=height,
+                         highlightthickness=0, width=w)
+        canv.create_line(10, height//2, w-10, height//2, fill=theme.SEPARATOR_COLOR)
+
+        def _on_mousewheel(event):
+            text_widget.yview_scroll(int(-1*(event.delta/120)), "units")
+        def _on_linux_up(_):
+            text_widget.yview_scroll(-1, "units")
+        def _on_linux_down(_):
+            text_widget.yview_scroll(1, "units")
+
+        canv.bind("<MouseWheel>", _on_mousewheel)
+        canv.bind("<Button-4>", _on_linux_up)
+        canv.bind("<Button-5>", _on_linux_down)
+
+        text_widget.window_create("end-1c", window=canv)
+        text_widget.insert("end-1c", "\n")
+    except tk.TclError:
+        text_widget.insert("end-1c", "-"*20 + "\n")
