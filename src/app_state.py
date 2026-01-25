@@ -6,13 +6,16 @@ import tkinter as tk
 from dataclasses import dataclass, field
 from typing import Optional, Any
 import config
-from ui_components import CustomScrollbar, InfoPanel
+from ui_components import InfoPanel
+from ui_helpers import CustomScrollbar
 
 @dataclass
 class IndicatorState:
     """Holds the thinking indicator state."""
     active: bool = False
     char: str = config.INDICATOR_CHARS[0]
+    mode: str = "thinking"  # "thinking" or "searching"
+    color_idx: int = 0
 
 @dataclass
 class ResponseState:
@@ -32,6 +35,7 @@ class UIState:
     """Holds UI visibility state."""
     show_info: bool = False
     sidebar_visible: bool = False
+    show_profiler: bool = False
 
 @dataclass
 class AppState:
@@ -81,17 +85,6 @@ class AppUI:
     sidebar: SidebarUI = field(default_factory=SidebarUI)
     tooltip_window: Optional[tk.Toplevel] = None
 
-@dataclass
-class CanvasConfig:
-    """Configuration for canvas region updates."""
-    canvas: tk.Canvas
-    bg_id: int
-    size: tuple[int, int]
-    radius: int
-    style: tuple[str, int, str]
-    win_id: int
-    pad: tuple[int, float]
-
 SLASH_COMMANDS = [
     ["/bypass", "Send raw prompt directly to model"],
     ["/clear", "Clear conversation history"],
@@ -100,5 +93,6 @@ SLASH_COMMANDS = [
     ["/help", "Show this help message"],
     ["/info", "Toggle model & system information"],
     ["/model", "Switch the current Ollama model"],
+    ["/profiler", "Toggle performance profiler"],
     ["/exit", "Exit the application"]
 ]

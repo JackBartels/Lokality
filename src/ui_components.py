@@ -1,63 +1,11 @@
 """
 Custom Tkinter UI components for Lokality.
 """
-import tkinter as tk
 from dataclasses import dataclass
 from typing import Optional
-from utils import round_rectangle
-
-class CustomScrollbar(tk.Frame):
-    """
-    A custom-styled scrollbar consisting of a canvas-drawn thumb within a frame.
-    """
-    def __init__(self, parent, command, **kwargs):
-        super().__init__(parent, **kwargs)
-        self.command = command
-        self.canvas = tk.Canvas(
-            self, width=12, highlightthickness=0, bg=parent["bg"]
-        )
-        self.canvas.pack(fill="both", expand=True)
-        self.thumb_color = "#424242"
-        self.thumb_hover = "#616161"
-        self.radius = 6
-
-        self.thumb_id = round_rectangle(
-            self.canvas, (2, 0, 10, 0), radius=self.radius, fill=self.thumb_color
-        )
-
-        self.canvas.bind("<Enter>", lambda e: self.canvas.itemconfig(
-            self.thumb_id, fill=self.thumb_hover
-        ))
-        self.canvas.bind("<Leave>", lambda e: self.canvas.itemconfig(
-            self.thumb_id, fill=self.thumb_color
-        ))
-        self.canvas.bind("<B1-Motion>", self.on_scroll)
-        self.canvas.bind("<Button-1>", self.on_scroll)
-
-    def set(self, low, high):
-        """Sets the position and size of the scrollbar thumb."""
-        height = self.winfo_height()
-        if height <= 1:
-            return
-
-        y1, y2 = float(low) * height, float(high) * height
-        if (y2 - y1) < 20:
-            y2 = y1 + 20 # Min thumb size
-        if y2 > height:
-            y1, y2 = height - (y2 - y1), height
-
-        radius = self.radius
-        pts = [
-            2+radius, y1, 10-radius, y1, 10, y1, 10, y1+radius,
-            10, y2-radius, 10, y2, 10-radius, y2, 2+radius, y2,
-            2, y2, 2, y2-radius, 2, y1+radius, 2, y1
-        ]
-        self.canvas.coords(self.thumb_id, *pts)
-
-    def on_scroll(self, event):
-        """Handles scroll interaction."""
-        if self.winfo_height() > 0:
-            self.command("moveto", event.y / self.winfo_height())
+import tkinter as tk
+from utils import CanvasConfig, round_rectangle
+from ui_helpers import update_canvas_region
 
 @dataclass
 class InfoUI:
@@ -154,11 +102,9 @@ class InfoPanel(tk.Frame):
         """Recalculates the position of labels based on available width."""
         width = self.winfo_width()
         if width < 100:
-            # Fallback to parent width or default to ensure we set a height
-            # and trigger visibility/geometry updates.
             width = self.master.winfo_width()
             if width < 100:
-                width = 600 # Safe default
+                width = 600
 
         max_w = width - 40
         rows, cur_w = [[]], 0
@@ -194,3 +140,80 @@ class InfoPanel(tk.Frame):
         self.ui.canvas.tag_lower(self.ui.bg_id)
         self.ui.canvas.itemconfig(self.ui.window_id, width=max_w, height=y_pos)
         self.ui.canvas.coords(self.ui.window_id, 20, (total_h - y_pos) / 2)
+
+class ProfilerPanel(tk.Frame):
+    """
+    A panel that displays real-time performance metrics from the Profiler.
+    """
+    COLORS = ["#2E5DA1", "#2D8A75", "#A12E2E", "#B17A19", "#6A1DA1"]
+    MARGIN = 12
+    LINE_H = 28
+
+    def __init__(self, parent, theme, fonts):
+        super().__init__(parent, bg=theme.BG_COLOR)
+        self.theme = theme
+        self.fonts = fonts
+        self.visible = False
+
+        self.canvas = tk.Canvas(self, bg=theme.BG_COLOR, highlightthickness=0, height=35)
+        self.canvas.pack(fill="x", padx=10, pady=(5, 5))
+
+        self.bg_id = round_rectangle(
+            self.canvas, (0, 0, 10, 10), radius=10,
+            fill="#1E1E1E", outline=theme.ACCENT_COLOR, width=1
+        )
+        self.canvas.bind("<Configure>", self._resize)
+
+    def update_data(self, tasks):
+        """
+        Draws the task breakdown vertically with proportional bar widths.
+        """
+        self.canvas.delete("bar")
+        self.canvas.delete("label")
+
+        if not tasks:
+            self.canvas.config(height=35)
+            self.canvas.create_text(
+                15, 18, anchor="w", text="Profiler Active - Waiting for data...",
+                fill=self.theme.FG_COLOR, font=self.fonts["unit"], tags="label"
+            )
+            self._resize(None)
+            return
+
+        total_h = (len(tasks) * self.LINE_H) + (self.MARGIN * 2)
+        self.canvas.config(height=total_h)
+
+        max_dur = max(t['duration'] for t in tasks) or 1
+        canvas_w = max(100, self.canvas.winfo_width())
+        if canvas_w < 100:
+            canvas_w = 800
+        available_w = canvas_w - 60
+
+        for i, task in enumerate(tasks):
+            y_off = self.MARGIN + (i * self.LINE_H)
+            dur = int(task['duration'])
+            text = f"{task['name']}: {dur}ms"
+            text_w = len(text) * 7.5 + 20
+            bar_w = max(text_w / 5, int((task['duration'] / max_dur) * available_w))
+
+            self.canvas.create_rectangle(
+                15, y_off, 15 + bar_w, y_off + 22,
+                fill=self.COLORS[i % len(self.COLORS)], outline="", tags="bar"
+            )
+            text_x = 22 if bar_w >= text_w else (15 + bar_w + 8)
+            self.canvas.create_text(
+                text_x, y_off + 11, anchor="w", text=text,
+                fill="#FFFFFF", font=self.fonts["unit"], tags="label"
+            )
+        self._resize(None)
+
+    def _resize(self, event):
+        w = event.width if event else self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        if w > 20:
+            self.bg_id = update_canvas_region(CanvasConfig(
+                canvas=self.canvas, bg_id=self.bg_id,
+                size=(w, h), radius=10,
+                style=(self.theme.ACCENT_COLOR, 1, "#1E1E1E"),
+                pad=(0, 0)
+            ))

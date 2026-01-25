@@ -2,8 +2,9 @@
 Search engine integration for Lokality.
 Handles web searching via DuckDuckGo and URL scraping.
 """
-import requests
-from bs4 import BeautifulSoup
+import time
+import trafilatura
+import wikipedia
 try:
     from ddgs import DDGS
 except ImportError:
@@ -22,65 +23,93 @@ class SearchEngine:
     """
     @staticmethod
     def scrape_url(url):
-        """Fetches a URL and extracts clean, readable text."""
+        """Fetches a URL and extracts clean, readable text using Trafilatura."""
+        start_time = time.time()
         logger.info("Scraping URL: %s", url)
         debug_print(f"[*] Scraping: {url}")
         try:
-            ua = (
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                'AppleWebKit/537.36 (KHTML, like Gecko) '
-                'Chrome/91.0.4472.124 Safari/537.36'
-            )
-            headers = {'User-Agent': ua}
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()
+            downloaded = trafilatura.fetch_url(url)
+            if downloaded is None:
+                raise ValueError("Failed to fetch content (empty response)")
 
-            soup = BeautifulSoup(response.text, 'html.parser')
+            clean_text = trafilatura.extract(downloaded)
+            if not clean_text:
+                raise ValueError("Failed to extract text from content")
 
-            # Remove script and style elements
-            for script_or_style in soup(["script", "style", "header", "footer", "nav"]):
-                script_or_style.decompose()
-
-            # Get text and clean up whitespace
-            text = soup.get_text(separator=' ')
-            lines = (line.strip() for line in text.splitlines())
-            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-            clean_text = '\n'.join(chunk for chunk in chunks if chunk)
+            duration = time.time() - start_time
+            logger.info("Scraping finished in %.2fs. Length: %d chars",
+                        duration, len(clean_text))
 
             # Limit to a reasonable amount of text for the LLM context
             return clean_text[:8000]
 
-        except (requests.RequestException, ValueError) as e:
-            logger.error("Scraping Error for '%s': %s", url, e)
-            return f"Failed to scrape URL '{url}': {e}"
+        except (ValueError, RuntimeError, ConnectionError) as exc:
+            duration = time.time() - start_time
+            logger.error("Scraping Error for '%s' after %.2fs: %s",
+                         url, duration, exc)
+            return f"Failed to scrape URL '{url}': {exc}"
+
+    @staticmethod
+    def wikipedia_search(query):
+        """
+        Performs a Wikipedia search and returns a summary.
+        """
+        start_time = time.time()
+        logger.info("Wikipedia Search: %s", query)
+        debug_print(f"[*] Wikipedia Search: {query}")
+        try:
+            # Try to get a specific page match first
+            search_results = wikipedia.search(query, results=1)
+            if not search_results:
+                return None
+
+            page = wikipedia.page(search_results[0], auto_suggest=False)
+            duration = time.time() - start_time
+            logger.info("Wikipedia: Found '%s' in %.2fs.", page.title, duration)
+
+            return (
+                f"Source: {page.url}\n"
+                f"Title: {page.title}\n"
+                f"Summary: {page.summary[:2000]}"
+            )
+        except (wikipedia.exceptions.DisambiguationError,
+                wikipedia.exceptions.PageError,
+                RuntimeError) as exc:
+            debug_print(f"[*] Wikipedia search failed for '{query}': {exc}")
+            return None
 
     @staticmethod
     def web_search(query):
         """Performs a DuckDuckGo search and returns the top results."""
+        start_time = time.time()
         logger.info("Web Search: %s", query)
         debug_print(f"[*] Searching for: {query}")
         try:
             with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=5))
+                results = list(ddgs.text(query, max_results=8))
+                duration = time.time() - start_time
+
                 if not results:
-                    logger.info("Web Search: No results found.")
+                    logger.info("Web Search: No results found (took %.2fs).", duration)
                     return "No recent web results found."
 
-                logger.info("Web Search: Found %d results.", len(results))
+                logger.info("Web Search: Found %d results in %.2fs.",
+                            len(results), duration)
                 formatted = []
-                for i, r in enumerate(results, 1):
+                for i, res in enumerate(results, 1):
                     # Log the source URLs at DEBUG level to avoid log bloat
-                    logger.debug("Search Result %d: %s", i, r.get('href'))
-                    formatted.append(f"Source: {r['href']}\nSnippet: {r['body']}")
+                    logger.debug("Search Result %d: %s", i, res.get('href'))
+                    formatted.append(f"Source: {res['href']}\nSnippet: {res['body']}")
                 return "\n\n".join(formatted)
-        except (requests.RequestException, ValueError, RuntimeError) as e:
-            logger.error("Search Error for '%s': %s", query, e)
+        except (ValueError, RuntimeError, ConnectionError) as exc:
+            duration = time.time() - start_time
+            logger.error("Search Error for '%s' after %.2fs: %s", query, duration, exc)
             # Differentiate between no results and connection errors
-            msg = str(e).lower()
-            if any(k in msg for k in ["connection", "timeout", "refused"]):
+            msg = str(exc).lower()
+            if any(key in msg for key in ["connection", "timeout", "refused"]):
                 return (
                     "CRITICAL: Web search failed due to a connectivity issue "
                     "(Internet might be down). You MUST inform the user you "
                     "cannot check real-time data right now."
                 )
-            return f"Search failed for query '{query}': {e}"
+            return f"Search failed for query '{query}': {exc}"

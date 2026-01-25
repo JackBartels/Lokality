@@ -1,0 +1,30 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="15" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <linearGradient id="l_grad" x1="160" y1="120" x2="320" y2="388" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8B93B5" />
+      <stop offset="1" stop-color="#6B728E" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background Container -->
+  <rect x="20" y="20" width="472" height="472" rx="100" fill="#212121" />
+  <rect x="20" y="20" width="472" height="472" rx="100" stroke="#6B728E" stroke-width="12" opacity="0.5" />
+
+  <!-- The "L" Shape -->
+  <path d="M180 140V330C180 352.091 197.909 370 220 370H340" 
+        stroke="url(#l_grad)" 
+        stroke-width="70" 
+        stroke-linecap="round" 
+        stroke-linejoin="round" 
+        opacity="0.9" />
+
+  <!-- The Spark (Top Right) -->
+  <g filter="url(#glow)">
+    <path d="M380 100C395 100 410 85 410 70C410 85 425 100 440 100C425 100 410 115 410 130C410 115 395 100 380 100Z" 
+          fill="#B3E5FC" />
+  </g>
+</svg>

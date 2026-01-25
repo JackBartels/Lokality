@@ -185,9 +185,61 @@ class MarkdownEngine:
         self.text_widget.insert("end-1c", token.get('raw', ''), ("md_code", base_tag))
 
     def _handle_block_code(self, token, base_tag, style_tags, level):
-        """Renders a block_code token."""
+        """Renders a block_code token with a copy button in header and footer."""
         del style_tags, level
-        self.text_widget.insert("end-1c", token.get('raw', ''), ("md_code", base_tag))
+        code_content = token.get('raw', '')
+        lang = token.get('attrs', {}).get('info', '')
+
+        # Track copy labels for this block to update them simultaneously
+        copy_labels = []
+
+        def do_copy():
+            self.text_widget.clipboard_clear()
+            self.text_widget.clipboard_append(code_content)
+            self.text_widget.update()
+
+            for lbl in copy_labels:
+                if lbl.winfo_exists():
+                    lbl.config(text="Copied!", fg=Theme.ACCENT_COLOR)
+
+            def _reset_labels():
+                for lbl in copy_labels:
+                    if lbl.winfo_exists():
+                        lbl.config(text="Copy", fg=Theme.LINK_COLOR)
+
+            self.text_widget.after(2000, _reset_labels)
+
+        # Helper to create the strip
+        def create_strip():
+            frame = tk.Frame(self.text_widget, bg=Theme.CODE_BG)
+            if lang:
+                tk.Label(
+                    frame, text=lang.upper(), font=self.fonts["unit"],
+                    bg=Theme.CODE_BG, fg=Theme.SYSTEM_COLOR, padx=8, pady=2
+                ).pack(side="left")
+
+            copy_lbl = tk.Label(
+                frame, text="Copy", font=self.fonts["unit"],
+                bg=Theme.CODE_BG, fg=Theme.LINK_COLOR, cursor="hand2", padx=8, pady=2
+            )
+            copy_lbl.bind("<Button-1>", do_copy)
+            copy_lbl.pack(side="right")
+            copy_labels.append(copy_lbl)
+            return frame
+
+        # Insert Header
+        header_frame = create_strip()
+        self.text_widget.window_create("end-1c", window=header_frame)
+        self.text_widget.insert("end-1c", "\n", base_tag)
+
+        # Insert Code
+        self.text_widget.insert("end-1c", code_content, ("md_code", base_tag))
+        if not code_content.endswith("\n"):
+            self.text_widget.insert("end-1c", "\n", base_tag)
+
+        # Insert Footer
+        footer_frame = create_strip()
+        self.text_widget.window_create("end-1c", window=footer_frame)
         self.text_widget.insert("end-1c", "\n", base_tag)
 
     def _handle_heading(self, token, base_tag, style_tags, level):

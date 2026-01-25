@@ -13,84 +13,71 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 - **SQLite3**: High-performance structured storage for long-term memory.
 - **psutil**: Cross-platform system monitoring for RAM/VRAM detection.
 - **Mistune 3.x**: Markdown parsing for rich text rendering.
-- **DuckDuckGo Search (ddgs)**: Real-time internet search context.
+- **Trafilatura**: Advanced web scraping and text extraction.
+- **Specialized APIs**: Wikipedia (encyclopedia), Python-weather, GNews, and YFinance (finance).
 
 ## Architecture & Features
 
 ### 1. Modern GUI
-- **Custom Theming**: Centralized in `src/theme.py`. A desaturated blue-purple palette with 6px thick rounded borders for distinct UI containers.
-- **Smart Input**: A minimalist input box that expands vertically up to 8 lines. It supports both manual newlines (Shift+Enter) and automatic expansion for word-wrapped text using visual line detection.
-- **Message Separation**: Faint horizontal separators (`#2A2A2A`) automatically inserted between message turns for clear visual structure.
-- **Rich Text Rendering**: Handled by a dedicated `MarkdownEngine` using a dispatcher-based token rendering system. Supports full Markdown including:
-  - **Hierarchical Headings** (H1-H3).
-  - **Nested Styling**: Bold, Italic, Strikethrough, Subscript, and Superscript (e.g., ***Bold Italic*** rendered correctly).
-  - **Complex Lists**: Nested ordered and unordered lists with correct indentation.
-  - **Blockquotes**: Distinct visual sidebar (`┃`) for quoted text.
-  - **Thematic Breaks**: Thicker, more visible horizontal rules.
-  - **Tables**: Bordered grids compatible with Mistune 3.x structures.
-  - **Interactive Links**: Clickable links with tooltips.
+- **Custom Theming**: Centralized in `src/theme.py`. A desaturated blue-purple palette with rounded borders.
+- **Smart Input**: A minimalist input box that expands vertically up to 8 lines with visual line detection.
+- **Responsive Layout**: Modular components using `grid` and `pack` with automatic resizing and rounded containers.
+- **Jump to Latest**: A floating button appears when scrolling away from the bottom to allow quick navigation back to the latest messages.
+- **Rich Text Rendering**: `MarkdownEngine` handles headings, nested lists, blockquotes, tables, and links.
+- **Interactive Code Blocks**: Code blocks include a header with the language name and a "Copy" button for easy interaction.
 
 ### 2. Intelligent Memory
-- **SQLite Powered**: Facts are stored in a structured database (`res/memory.db`).
-- **Contextual Retrieval**: Instead of loading all facts, the assistant uses FTS5-powered keyword matching to fetch only the most relevant memories for the current query.
-- **Strict Extraction Logic**: Handled by `MemoryManager`. It uses an LLM-driven delta management system with a "Golden Rule": only record facts that will be relevant in one month.
-  - **No Inference**: Preferences (likes/dislikes) are ONLY recorded if explicitly stated by the user.
-  - **No Transients**: Current actions, recent chat events, and present-tense "wants" (e.g., "wants to know the time") are strictly ignored.
+- **SQLite Powered**: Facts are stored in `res/memory.db`.
+- **Contextual Retrieval**: Uses FTS5-powered keyword matching to fetch only relevant memories.
+- **Strict Extraction**: `MemoryManager` uses LLM-driven delta management with the "Golden Rule" (1-month relevance) and transient filtering.
+- **Parallel Processing**: Memory retrieval runs in parallel with search gatekeeping during the turn preparation phase to minimize latency.
 
-### 3. Real-Time Search & Integration
-- **Search Engine**: A decoupled module using DuckDuckGo to fetch real-time data when the LLM determines it is necessary.
-- **Bypass Mode**: A raw shell integration using PTY (Pseudo-Terminal) allows users to bypass the assistant logic and speak directly to the Ollama CLI wrapper.
+### 3. Multi-Stage Search & Specialized Tools
+- **Pipeline Architecture**:
+  1. **Gatekeeper**: A fast, single-token check to decide if search is even necessary.
+  2. **Planner**: A JSON-based planner that formulates queries and identifies specialized intents (Weather, News, Finance).
+  3. **Wikipedia Pass**: Checks Wikipedia for general knowledge before hitting the live web.
+  4. **Live Search**: Uses DuckDuckGo for real-time results.
+  5. **Analytical Scraping**: Uses `trafilatura` for high-quality content extraction from selected URLs.
+- **Specialized Search**: Dedicated modules for weather, global news, and financial data (tickers/stock prices).
 
-### 4. System Monitoring & Logging
-- **Hardware-Aware Initialization**: On startup, if no models are detected, `LocalChatAssistant` uses `psutil` and `sysfs` (on Linux) to detect available VRAM (supporting NVIDIA, AMD, and Intel). It selects the largest suitable Gemma 3 model from a predefined list in `config.py` and pulls it using the Ollama API, providing in-place progress updates in the GUI via carriage return (`\r`) handling.
-- **Live Stats**: Handled by `StatsCollector`. Real-time tracking of Ollama model resource usage, including RAM, VRAM, and estimated context window consumption.
-- **Visual Refinement**: Units (MB, %) are rendered in a smaller `unit` font for better visual hierarchy. Stats refresh automatically after every response.
-- **Persistent Logging**: A centralized `logger.py` module handles timestamped logs in the `logs/` directory. Features automatic log rotation/cleanup (keeps logs for 30 days) and simultaneous stream/file output.
+### 4. Performance Profiling
+- **Real-Time Tracking**: The `Profiler` module tracks timing for critical operations (Search, Scraping, Memory, LLM Generation).
+- **Visual Dashboard**: A dedicated `ProfilerPanel` (toggled via `/profiler`) displays a vertical bar chart of task durations for the current turn.
 
-### 5. Dynamic Complexity Scoring
-- **Intent Analysis**: Uses keyword matching and linguistic analysis (ARI) to predict the required thinking effort for a prompt.
-- **Hardware-Safe Scaling**: Dynamically adjusts `num_ctx` based on available VRAM headroom to prevent OOM errors while maximizing context for complex tasks.
-- **Creativity Mapping**: Predicts creative intent to adjust sampling parameters (`temperature`, `top_p`, `top_k`) for more varied or deterministic responses.
-
-### 6. Persistent Settings
-- **State Preservation**: Certain UI and session toggles (e.g., `debug` mode, `info` panel visibility) are persisted between application restarts.
-- **Storage**: Settings are stored in a lightweight JSON format (`res/settings.json`), managed by the `Settings` class in `src/settings.py`.
-- **Initialization**: Persistent states are applied during the asynchronous initialization phase to ensure the UI correctly reflects the user's last session state upon startup.
+### 5. System Monitoring & Settings
+- **Hardware-Aware Initialization**: Auto-pulls the largest suitable Gemma 3 model based on available VRAM (supporting NVIDIA, AMD, and Intel).
+- **Live Stats**: `StatsCollector` tracks real-time RAM/VRAM usage and context consumption.
+- **State Preservation**: Persistent settings (`res/settings.json`) store UI toggles and selected models across sessions.
 
 ## Project Structure
 
 - `src/`: Refactored into specialized modules.
-  - `app.py`: Main entry point and GUI orchestration. Maintained for readability and modularity.
-  - `app_state.py`: Centralized state management using dataclasses for UI components, process status, and response handling.
-  - `complexity_scorer.py`: Analyzes user input to dynamically adjust model parameters (context window, temperature, penalties) based on predicted complexity and creativity.
-  - `config.py`: Global constants.
-  - `theme.py`: UI styling, colors, and font definitions.
-  - `markdown_engine.py`: Dispatcher-based logic for rendering Markdown tokens into Tkinter widgets. Supports complex nesting and modern Mistune plugins.
-  - `logger.py`: Centralized logging configuration with automatic file-based persistence and cleanup logic.
-  - `settings.py`: Handles loading and saving of persistent application settings.
-  - `shell_integration.py`: PTY-based logic for the direct Ollama bypass.
-  - `local_assistant.py`: Core logic for conversation management and system prompt templating.
-  - `memory.py`: Low-level SQLite database interface with FTS5 triggers. Features state-tracking to prevent race conditions during memory clearing.
-  - `memory_manager.py`: LLM-driven fact extraction with strict transient filtering.
-  - `search_engine.py`: DuckDuckGo search integration.
+  - `app.py`: Main entry point and GUI orchestration.
+  - `app_state.py`: Centralized state management using dataclasses.
+  - `complexity_scorer.py`: Analyzes input to dynamically adjust model parameters.
+  - `config.py`: Global constants and UI configuration.
+  - `local_assistant.py`: Core logic for conversation, search orchestration, and memory.
+  - `markdown_engine.py`: Dispatcher-based Markdown rendering with code interaction.
+  - `memory.py`: Low-level SQLite database interface with FTS5.
+  - `memory_manager.py`: LLM-driven fact extraction and filtering.
+  - `profiler.py`: Performance measurement and task tracking.
+  - `search_engine.py`: Wikipedia and DuckDuckGo integration with scraping.
+  - `specialized_search.py`: Handlers for weather, news, and financial data.
   - `stats_collector.py`: Resource monitoring and context estimation.
-  - `ui_components.py`: Custom Tkinter widgets (Scrollbars, InfoPanel) with optimized layout.
-  - `ui_dialogs.py`: Modular dialog windows (e.g., confirmation for clearing memory).
-  - `ui_helpers.py`: Shared GUI utilities for syntax highlighting, input height adjustment, and chat tag configuration.
-  - `utils.py`: Shared utilities (rounded rectangles, ANSI stripping, environment health checks).
-- `res/`: Persistent data.
-  - `memory.db`: The SQLite database for long-term memory.
-  - `settings.json`: Persistent application configuration (ignored by git).
-- `launch.sh`: Main entry point for launching the application via `src/app.py`.
+  - `ui_components.py`: Custom widgets (Scrollbars, InfoPanel, ProfilerPanel).
+  - `ui_dialogs.py`: Modular dialog windows (Confirmation, Alerts).
+  - `ui_helpers.py`: Shared GUI utilities (Jump button, Chat tags).
+  - `utils.py`: Shared utilities (Rounded rectangles, Resource detection).
+- `res/`: Persistent data (Memory DB, Settings, Assets).
+- `tests/`: Comprehensive test suite covering all modules.
 
 ## Development Conventions
 
 - **Modular Design**: UI, Search, Stats, and Memory logic are strictly separated.
-- **Non-Blocking**: Heavy operations (LLM extraction, web search, stats gathering) run in background threads.
-- **Selective Learning**: The assistant is extractive and strict, focusing on permanent user attributes and identity facts.
-- **Prompt Stability**: Model prompts and instructions should never be modified as part of refactors, except for formatting changes.
-- **Code Quality**: Strict adherence to Pylint standards. A perfect **10.00/10** score is required. Disabling Pylint warnings via comments (e.g., `# pylint: disable=...`) is **STRICTLY FORBIDDEN**. Code must be refactored to comply with rules and best practices.
-- **Testing**: All changes must be verified with the test suite: `PYTHONPATH=src .venv/bin/python -m unittest discover tests`.
-- **Documentation**: `@README.md` must strictly contain information relevant to the user (features, commands, installation). Technical backend details like testing instructions, CI/CD workflows, or architectural internals should be kept in `@GEMINI.md` or other development-focused files.
-- **GitHub Interaction**: Always use `gh` commands when interacting with GitHub (PRs, issues, repository metadata, etc.).
-- **Git & Version Control**: NEVER execute `git commit` or any command that modifies the commit history unless explicitly instructed to do so by the user for a specific set of changes. Preliminary staging (`git add`) is acceptable for preparation, but final commits are user-gated.
+- **File Integrity**: ALWAYS read the full content of a file before attempting to edit it. This ensures accurate targeting and prevents truncation or logic errors.
+- **Non-Blocking**: Heavy operations run in background threads with status updates via a message queue.
+- **Selective Learning**: Focus on permanent user attributes and identity facts; ignore transients.
+- **Code Quality**: Strict adherence to Pylint standards (10.00/10 score). No `# pylint: disable` comments allowed.
+- **Testing**: All changes must be verified with: `PYTHONPATH=src .venv/bin/python -m unittest discover tests`.
+- **Git & Version Control**: Preliminary staging (`git add`) is acceptable, but final commits are user-gated.

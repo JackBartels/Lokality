@@ -58,7 +58,7 @@ class TestCommands(unittest.TestCase):
             mock_inst.get.side_effect = self.test_settings_dict.get
             mock_inst.set.side_effect = self.test_settings_dict.__setitem__
 
-            self.app = AssistantApp(root)
+            self.app = AssistantApp(root, skip_init=True)
             self.app.settings = mock_inst
 
         # Manually trigger assistant initialization with a mock
@@ -72,11 +72,10 @@ class TestCommands(unittest.TestCase):
 
     def test_command_clear_logic(self):
         """Test the /clear command."""
-        # Verify that /clear actually resets messages and puts "clear" in queue
-        self.app.state.assistant.messages = [{"role": "user", "content": "hi"}]
+        # Verify that /clear actually calls clear_conversation and puts "clear" in queue
         self.app.process_input("/clear")
 
-        self.assertEqual(self.app.state.assistant.messages, [])
+        self.app.state.assistant.clear_conversation.assert_called_once()
 
         # Check queue for expected signals
         queue_actions = []
