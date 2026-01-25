@@ -22,17 +22,22 @@ from complexity_scorer import ComplexityScorer
 from config import VERSION
 from logger import logger
 from markdown_engine import MarkdownEngine
+from profiler import Profiler
 from settings import Settings
 from shell_integration import run_ollama_bypass
 import theme as Theme
-from app_state import AppState, AppUI, CanvasConfig, SLASH_COMMANDS
-from ui_components import CustomScrollbar, InfoPanel
+from app_state import AppState, AppUI, SLASH_COMMANDS
+from ui_components import InfoPanel, ProfilerPanel
 from ui_helpers import (
     update_canvas_region, update_lower_border, highlight_commands, handle_tab,
-    adjust_input_height, configure_chat_tags, insert_chat_separator
+    adjust_input_height, configure_chat_tags, insert_chat_separator, setup_jump_button,
+    build_model_sidebar, handle_link_tooltip, CustomScrollbar
 )
 from ui_dialogs import show_forget_dialog
 from utils import (
+    CanvasConfig,
+    SidebarCallbacks,
+    SidebarConfig,
     RedirectedStdout,
     debug_print,
     error_print,
@@ -48,7 +53,7 @@ threading.excepthook = thread_excepthook
 
 class AssistantApp:
     """The main application class for the Lokality GUI."""
-    def __init__(self, root):
+    def __init__(self, root, skip_init=False):
         self.root = root
         self.root.report_callback_exception = self.handle_tk_exception
         self.root.title(f"Lokality ({VERSION})")
@@ -63,6 +68,8 @@ class AssistantApp:
         # Load persistent toggles
         config.DEBUG = self.settings.get("debug", False)
         self.state.ui_state.show_info = self.settings.get("show_info", False)
+        self.state.ui_state.show_profiler = self.settings.get("show_profiler", False)
+        Profiler().enabled = self.state.ui_state.show_profiler
         config.MODEL_NAME = self.settings.get("model_name", config.MODEL_NAME)
         if config.DEBUG:
             logger.setLevel(logging.DEBUG)
@@ -80,7 +87,8 @@ class AssistantApp:
         sys.stderr = RedirectedStdout(self.state.msg_queue, "error")
 
         info_print(f"Lokality {VERSION} starting...")
-        threading.Thread(target=self._initialize_async, daemon=True).start()
+        if not skip_init:
+            threading.Thread(target=self._initialize_async, daemon=True).start()
 
     def _setup_markdown(self):
         """Initializes the markdown engine and parser."""
@@ -102,6 +110,12 @@ class AssistantApp:
         """Heavy initialization tasks run in background."""
         try:
             self.state.assistant = local_assistant.LocalChatAssistant()
+            self.state.assistant.on_search_start = lambda: self.state.msg_queue.put(
+                ("search_start", None, None)
+            )
+            self.state.assistant.on_search_end = lambda: self.state.msg_queue.put(
+                ("search_end", None, None)
+            )
             info_print("Chat Assistant ready.")
 
             # Initial info update if panel is visible
@@ -124,9 +138,15 @@ class AssistantApp:
 
     def _setup_ui(self):
         """Configures the main window layout and components."""
-        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_rowconfigure(0, weight=0) # Profiler row
+        self.root.grid_rowconfigure(1, weight=1) # Chat row
         self.root.grid_columnconfigure(0, weight=0) # Sidebar column
         self.root.grid_columnconfigure(1, weight=1) # Chat column
+
+        self.ui.profiler_panel = ProfilerPanel(self.root, Theme, self.fonts)
+        self.ui.profiler_panel.grid(row=0, column=0, columnspan=2, sticky="ew")
+        if not self.state.ui_state.show_profiler:
+            self.ui.profiler_panel.grid_remove()
 
         self._setup_sidebar()
         self._setup_chat_area()
@@ -134,7 +154,7 @@ class AssistantApp:
 
         self.ui.info_panel = InfoPanel(self.root, Theme, self.fonts)
         self.ui.info_panel.show_info = self.state.ui_state.show_info
-        self.ui.info_panel.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=0)
+        self.ui.info_panel.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=0)
         if not self.state.ui_state.show_info:
             self.ui.info_panel.grid_remove()
 
@@ -147,7 +167,7 @@ class AssistantApp:
         self.ui.sidebar.frame = tk.Frame(
             self.root, bg=Theme.BG_COLOR, width=0, highlightthickness=0
         )
-        self.ui.sidebar.frame.grid(row=0, column=0, sticky="nsew", padx=(10, 0), pady=(10, 7))
+        self.ui.sidebar.frame.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=(10, 7))
         self.ui.sidebar.frame.grid_remove() # Hidden by default
 
     def _setup_chat_area(self):
@@ -156,7 +176,7 @@ class AssistantApp:
             self.root, bg=Theme.BG_COLOR, highlightthickness=0
         )
         self.ui.chat.canvas.grid(
-            row=0, column=1, sticky="nsew", padx=10, pady=(10, 7)
+            row=1, column=1, sticky="nsew", padx=10, pady=(10, 7)
         )
         self.ui.chat.bg_id = round_rectangle(
             self.ui.chat.canvas, (4, 4, 10, 10), radius=25,
@@ -192,43 +212,9 @@ class AssistantApp:
 
         self.ui.chat.display.config(yscrollcommand=on_display_scroll)
 
-        # "Jump to latest" button (Canvas-based for styling)
-        self.ui.chat.jump_btn_canvas = tk.Canvas(
-            self.root, width=300, height=80,
-            bg=Theme.BG_COLOR, highlightthickness=0, bd=0
+        self.ui.chat.jump_btn_canvas = setup_jump_button(
+            self.root, self.fonts, self.scroll_to_bottom
         )
-
-        # Shadow (drawn first)
-        round_rectangle(
-            self.ui.chat.jump_btn_canvas, (8, 8, 292, 72), radius=25,
-            fill="#111111", outline="", width=0, tags="btn_shadow"
-        )
-
-        # Draw the button content
-        round_rectangle(
-            self.ui.chat.jump_btn_canvas, (2, 2, 284, 64), radius=25,
-            fill=Theme.JUMP_BTN_BG, outline="", width=0, tags="btn_bg"
-        )
-
-        # Text (Simple, no border)
-        self.ui.chat.jump_btn_canvas.create_text(
-            143, 33, text="↓   Jump to latest", fill=Theme.FG_COLOR,
-            font=self.fonts["bold"], tags="btn_text"
-        )
-
-        # Bindings
-        for tag in ("btn_bg", "btn_text", "btn_shadow"):
-            self.ui.chat.jump_btn_canvas.tag_bind(
-                tag, "<Button-1>", lambda e: self.scroll_to_bottom()
-            )
-            self.ui.chat.jump_btn_canvas.tag_bind(
-                tag, "<Enter>",
-                lambda e: self.ui.chat.jump_btn_canvas.config(cursor="hand2")
-            )
-            self.ui.chat.jump_btn_canvas.tag_bind(
-                tag, "<Leave>",
-                lambda e: self.ui.chat.jump_btn_canvas.config(cursor="")
-            )
 
         self._configure_tags()
         self.ui.chat.display.mark_set("assistant_msg_start", "1.0")
@@ -248,7 +234,7 @@ class AssistantApp:
             height=line_h + 20
         )
         self.ui.input.canvas.grid(
-            row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=(7, 20)
+            row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=(7, 20)
         )
         self.ui.input.bg_id = round_rectangle(
             self.ui.input.canvas, (4, 4, 10, 10), radius=20,
@@ -430,6 +416,7 @@ class AssistantApp:
 
     def _run_streaming_chat(self, user_input, complexity, msgs):
         """Handles the streaming response from the LLM."""
+        Profiler().start("Response Generation")
         try:
             full_resp = ""
             stream = get_ollama_client().chat(
@@ -443,8 +430,10 @@ class AssistantApp:
                 full_resp += cnt
                 self.state.msg_queue.put(("text", cnt, "assistant"))
 
+            Profiler().stop("Response Generation")
             self._finalize_chat_response(user_input, full_resp)
         except (ollama.ResponseError, AttributeError, ConnectionError) as exc:
+            Profiler().stop("Response Generation")
             error_print(f"Assistant Error: {format_error_msg(exc)}")
 
     def _finalize_chat_response(self, user_input, full_resp):
@@ -463,7 +452,15 @@ class AssistantApp:
 
         self.state.msg_queue.put(("final_render", "", "assistant"))
         if not self.state.process.stop_generation:
-            self.state.assistant.update_memory_async(user_input, full_resp)
+            def on_mem_complete():
+                if self.state.ui_state.show_profiler:
+                    self.state.msg_queue.put((
+                        "update_profiler_ui", Profiler().get_latest_data(), None
+                    ))
+
+            self.state.assistant.update_memory_async(
+                user_input, full_resp, on_complete=on_mem_complete
+            )
 
         if len(self.state.assistant.messages) > 20:
             self.state.assistant.messages = self.state.assistant.messages[-20:]
@@ -476,7 +473,7 @@ class AssistantApp:
                 '/clear': self._cmd_clear, '/debug': self._cmd_debug,
                 '/forget': self._cmd_forget, '/info': self._cmd_info,
                 '/help': self._cmd_help, '/exit': self._cmd_exit,
-                '/model': self._cmd_model,
+                '/model': self._cmd_model, '/profiler': self._cmd_profiler,
                 'exit': self._cmd_exit, 'quit': self._cmd_exit
             }
             parts = user_input.lower().split()
@@ -493,16 +490,34 @@ class AssistantApp:
             def run_assistant():
                 try:
                     complexity = ComplexityScorer.analyze(user_input)
-
                     skip_search = complexity['level'] == ComplexityScorer.LEVEL_MINIMAL
-                    ctx = self.state.assistant.decide_and_search(
-                        user_input, skip_llm=skip_search
-                    )
 
-                    self.state.assistant.update_system_prompt(user_input)
+                    # PARALLEL STEP: Retrieve memory facts and check search
+                    prep_result = self.state.assistant.prepare_turn(
+                        user_input, skip_search=skip_search
+                    )
+                    facts = prep_result["facts"]
+                    ctx = prep_result["search_context"]
+
+                    # ROLEPLAY: Maximize parameters if RP detected
+                    if prep_result.get("search_type") == "roleplay":
+                        debug_print("[*] Roleplay detected: Maximizing creativity parameters.")
+                        complexity['params']['temperature'] = 1.0
+                        complexity['params']['top_p'] = 1.0
+
+                    self.state.assistant.update_system_prompt(
+                        user_input, facts=facts
+                    )
                     msgs = self._get_assistant_msgs(user_input, ctx)
                     self._run_streaming_chat(user_input, complexity, msgs)
+                except Exception as exc: # pylint: disable=broad-exception-caught
+                    error_print(f"Thread Error ({threading.current_thread().name}): {exc}")
+                    logger.exception("Assistant thread failed")
                 finally:
+                    if self.state.ui_state.show_profiler:
+                        self.state.msg_queue.put((
+                            "update_profiler_ui", Profiler().get_latest_data(), None
+                        ))
                     self.state.msg_queue.put(("enable", None, None))
 
             threading.Thread(target=run_assistant, daemon=True).start()
@@ -518,7 +533,7 @@ class AssistantApp:
 
     def _cmd_clear(self, _):
         if self.state.assistant:
-            self.state.assistant.messages = []
+            self.state.assistant.clear_conversation()
             self.markdown_engine.clear()
             info_print("Conversation history cleared.")
             self.state.msg_queue.put(("clear", None, None))
@@ -557,6 +572,20 @@ class AssistantApp:
         self.state.msg_queue.put(("toggle_info", None, None))
         self.state.msg_queue.put(("enable", None, None))
 
+    def _cmd_profiler(self, _):
+        """Toggles the performance profiler display."""
+        self.state.ui_state.show_profiler = not self.state.ui_state.show_profiler
+        self.settings.set("show_profiler", self.state.ui_state.show_profiler)
+        Profiler().enabled = self.state.ui_state.show_profiler
+
+        if self.state.ui_state.show_profiler:
+            self.ui.profiler_panel.grid()
+            # Immediately show any existing data from the last turn
+            self.ui.profiler_panel.update_data(Profiler().get_latest_data())
+        else:
+            self.ui.profiler_panel.grid_remove()
+        self.state.msg_queue.put(("enable", None, None))
+
     def _cmd_help(self, _):
         logger.info("Help command invoked.")
         lines = []
@@ -588,75 +617,20 @@ class AssistantApp:
 
     def _build_model_sidebar(self, models):
         """Constructs the model selection UI components."""
-        for widget in self.ui.sidebar.frame.winfo_children():
-            widget.destroy()
-
         self.state.ui_state.sidebar_visible = True
         self.ui.sidebar.frame.grid()
-
-        header = tk.Frame(self.ui.sidebar.frame, bg=Theme.BG_COLOR)
-        header.pack(fill="x", padx=10, pady=(5, 0))
-        header.grid_columnconfigure(0, weight=1)
-
-        tk.Label(header, text="Models", font=self.fonts["h3"],
-                 bg=Theme.BG_COLOR, fg=Theme.FG_COLOR).grid(row=0, column=0)
-
-        tk.Button(header, text="<", command=self._close_sidebar, font=("Roboto", 24),
-                  bg=Theme.BG_COLOR, fg=Theme.SYSTEM_COLOR, borderwidth=0,
-                  highlightthickness=0, activebackground=Theme.BG_COLOR,
-                  activeforeground=Theme.FG_COLOR, cursor="hand2").grid(row=0, column=0, sticky="w")
-
-        self.ui.sidebar.canvas = tk.Canvas(
-            self.ui.sidebar.frame, bg=Theme.BG_COLOR, highlightthickness=0
+        callbacks = SidebarCallbacks(
+            on_switch=self._switch_model_logic,
+            on_close=self._close_sidebar,
+            on_resize=self._on_sidebar_canvas_configure
         )
-        self.ui.sidebar.canvas.pack(fill="both", expand=True, padx=10, pady=(2, 0))
-
-        self.ui.sidebar.bg_id = round_rectangle(
-            self.ui.sidebar.canvas, (4, 4, 10, 10), radius=25,
-            outline=Theme.ACCENT_COLOR, width=6, fill=Theme.INPUT_BG
+        cfg = SidebarConfig(
+            parent=self.ui.sidebar.frame, theme=Theme, fonts=self.fonts,
+            models=models, current_model=config.MODEL_NAME,
+            callbacks=callbacks
         )
-
-        inner = tk.Frame(self.ui.sidebar.canvas, bg=Theme.INPUT_BG)
-        self.ui.sidebar.window_id = self.ui.sidebar.canvas.create_window(
-            12, 12, anchor="nw", window=inner
-        )
-
-        self._create_model_listbox(inner, models)
-        self.ui.sidebar.canvas.bind("<Configure>", self._on_sidebar_canvas_configure)
-
-    def _create_model_listbox(self, parent, models):
-        """Creates and populates the model listbox."""
-        listbox = tk.Listbox(
-            parent, font=self.fonts["base"], bg=Theme.INPUT_BG,
-            fg=Theme.FG_COLOR, selectbackground=Theme.USER_COLOR,
-            selectforeground=Theme.BG_COLOR, borderwidth=0,
-            highlightthickness=0, activestyle='none', width=25
-        )
-        listbox.pack(side="left", fill="both", expand=True)
-
-        scrollbar = CustomScrollbar(parent, command=listbox.yview, bg=Theme.INPUT_BG)
-        scrollbar.pack(side="right", fill="y")
-        listbox.config(yscrollcommand=scrollbar.set)
-
-        curr = config.MODEL_NAME
-        for i, model in enumerate(models):
-            display_name = f"{model} (Current)" if model == curr else model
-            listbox.insert(tk.END, display_name)
-            if model == curr:
-                listbox.selection_set(i)
-                listbox.see(i)
-
-        def _confirm(_=None):
-            selection = listbox.curselection()
-            if selection:
-                new_model = models[selection[0]]
-                if new_model != config.MODEL_NAME:
-                    self._switch_model_logic(new_model)
-            self._close_sidebar()
-
-        listbox.bind("<Return>", _confirm)
-        listbox.bind("<Double-Button-1>", _confirm)
-        listbox.focus_set()
+        self.ui.sidebar.canvas, self.ui.sidebar.bg_id, self.ui.sidebar.window_id = \
+            build_model_sidebar(cfg)
 
     def _switch_model_logic(self, new_model):
         """Handles the actual model switching process."""
@@ -721,6 +695,11 @@ class AssistantApp:
         """Helper to render assistant text stream with markdown."""
         if not final:
             self.state.response.full_text += text
+
+        # Sanitize buffer to prevent tag leakage
+        self.state.response.full_text = self.state.response.full_text.replace(
+            "<SEARCH_CONTEXT>", "").replace("</SEARCH_CONTEXT>", "")
+
         if "\n" in text or final:
             cur = self.state.response.full_text.strip()
             if len(cur) > self.state.response.last_rendered_len or final:
@@ -748,7 +727,8 @@ class AssistantApp:
             if final:
                 self._finalize_message_turn()
         else:
-            self.ui.chat.display.insert("end-1c", text, "assistant")
+            clean_text = text.replace("<SEARCH_CONTEXT>", "").replace("</SEARCH_CONTEXT>", "")
+            self.ui.chat.display.insert("end-1c", clean_text, "assistant")
 
     def _display_message(self, text, tag, final=False):
         """Renders messages in the chat display with Markdown support."""
@@ -808,27 +788,9 @@ class AssistantApp:
 
     def _handle_tooltip(self, _, url):
         """Displays a tooltip for links."""
-        if not url:
-            if self.ui.tooltip_window:
-                try:
-                    self.ui.tooltip_window.destroy()
-                except tk.TclError:
-                    pass
-                self.ui.tooltip_window = None
-            return
-        if self.ui.tooltip_window:
-            return
-        try:
-            xp, yp = self.root.winfo_pointerx() + 15, self.root.winfo_pointery() + 15
-            self.ui.tooltip_window = win = tk.Toplevel(self.root)
-            win.wm_overrideredirect(True)
-            win.wm_geometry(f"+{xp}+{yp}")
-            tk.Label(win, text=f"Ctrl + Click to open {url}",
-                     background=Theme.TOOLTIP_BG, foreground=Theme.FG_COLOR,
-                     relief='solid', borderwidth=1, font=self.fonts["tooltip"],
-                     padx=5, pady=2).pack()
-        except tk.TclError:
-            self.ui.tooltip_window = None
+        self.ui.tooltip_window = handle_link_tooltip(
+            self.root, self.ui.tooltip_window, url, Theme, self.fonts
+        )
 
     def _check_queue(self):
         """Polls the message queue for UI updates."""
@@ -845,39 +807,89 @@ class AssistantApp:
 
     def _dispatch_queue_action(self, action, content, tag):
         """Dispatcher for UI actions from the message queue."""
-        if action == "text":
-            if tag == "cancelled":
-                self.state.indicator.active = False
-            self._display_message(content, tag)
-        elif action == "start_indicator":
-            self._start_indicator()
-        elif action == "replace_last":
-            self._replace_last_message(content, tag)
-        elif action == "clear":
-            self.ui.chat.display.config(state='normal')
-            self.ui.chat.display.delete("1.0", tk.END)
-            self.ui.chat.display.config(state='disabled')
-            self._display_message("Type /help for commands.\n\n", "system")
-        elif action == "separator":
-            self.ui.chat.display.config(state='normal')
-            self._insert_separator(height=40)
-            self.ui.chat.display.config(state='disabled')
-        elif action == "final_render":
+        dispatch = {
+            "text": self._handle_action_text,
+            "start_indicator": self._handle_action_start_indicator,
+            "search_start": self._handle_action_search_start,
+            "search_end": self._handle_action_search_end,
+            "replace_last": self._replace_last_message,
+            "clear": self._handle_action_clear,
+            "separator": self._handle_action_separator,
+            "final_render": self._handle_action_final_render,
+            "toggle_info": self._handle_action_toggle_info,
+            "update_info_ui": self._handle_action_update_info,
+            "update_profiler_ui": self._handle_action_update_profiler,
+            "enable": self._handle_action_enable,
+            "quit": self._handle_action_quit
+        }
+
+        if action in dispatch:
+            dispatch[action](content, tag)
+
+    def _handle_action_update_info(self, content, _tag):
+        """Handles update_info_ui action."""
+        self.ui.info_panel.update_stats(content)
+
+    def _handle_action_update_profiler(self, content, _tag):
+        """Handles update_profiler_ui action."""
+        self.ui.profiler_panel.update_data(content)
+
+    def _handle_action_quit(self, _content, _tag):
+        """Handles quit action."""
+        self.root.quit()
+
+    def _handle_action_text(self, content, tag):
+        """Handles text action from queue."""
+        if tag == "cancelled":
             self.state.indicator.active = False
-            self._display_message("", tag, final=True)
-            self._update_info_display()
-        elif action == "toggle_info":
-            self.state.ui_state.show_info = self.ui.info_panel.toggle()
-            self.settings.set("show_info", self.state.ui_state.show_info)
-            self._update_info_display()
-        elif action == "update_info_ui":
-            self.ui.info_panel.update_stats(content)
-        elif action == "enable":
-            self.state.process.is_busy = False
-            self.ui.input.field.focus_set()
-            self._adjust_input_height()
-        elif action == "quit":
-            self.root.quit()
+        self._display_message(content, tag)
+
+    def _handle_action_start_indicator(self, _content, _tag):
+        """Handles start_indicator action from queue."""
+        self._start_indicator()
+
+    def _handle_action_search_start(self, _content, _tag):
+        """Handles search_start action from queue."""
+        self.state.indicator.mode = "searching"
+        self.state.indicator.char = config.SEARCH_INDICATOR_CHAR
+        self._update_indicator_ui()
+
+    def _handle_action_search_end(self, _content, _tag):
+        """Handles search_end action from queue."""
+        self.state.indicator.mode = "thinking"
+        self.state.indicator.char = config.INDICATOR_CHARS[0]
+        self._update_indicator_ui()
+
+    def _handle_action_clear(self, _content, _tag):
+        """Handles clear action from queue."""
+        self.ui.chat.display.config(state='normal')
+        self.ui.chat.display.delete("1.0", tk.END)
+        self.ui.chat.display.config(state='disabled')
+        self._display_message("Type /help for commands.\n\n", "system")
+
+    def _handle_action_separator(self, _content, _tag):
+        """Handles separator action from queue."""
+        self.ui.chat.display.config(state='normal')
+        self._insert_separator(height=40)
+        self.ui.chat.display.config(state='disabled')
+
+    def _handle_action_final_render(self, _content, tag):
+        """Handles final_render action from queue."""
+        self.state.indicator.active = False
+        self._display_message("", tag, final=True)
+        self._update_info_display()
+
+    def _handle_action_toggle_info(self, _content, _tag):
+        """Handles toggle_info action from queue."""
+        self.state.ui_state.show_info = self.ui.info_panel.toggle()
+        self.settings.set("show_info", self.state.ui_state.show_info)
+        self._update_info_display()
+
+    def _handle_action_enable(self, _content, _tag):
+        """Handles enable action from queue."""
+        self.state.process.is_busy = False
+        self.ui.input.field.focus_set()
+        self._adjust_input_height()
 
     def _update_info_display(self):
         """Fetches and displays model info in the info panel."""
@@ -909,7 +921,9 @@ class AssistantApp:
         """Starts the thinking/responding indicator."""
         if not self.state.indicator.active:
             self.state.indicator.active = True
+            self.state.indicator.mode = "thinking"
             self.state.indicator.char = config.INDICATOR_CHARS[0]
+            self.state.indicator.color_idx = 0
             self.ui.chat.display.config(state='normal')
             try:
                 # Ensure we start on a new line
@@ -930,26 +944,37 @@ class AssistantApp:
             self._toggle_indicator()
 
     def _toggle_indicator(self):
-        """Alternates the indicator symbol every second."""
+        """Alternates the indicator symbol or color every 700ms."""
         if not self.state.indicator.active:
             return
 
-        chars = config.INDICATOR_CHARS
-        try:
-            idx = chars.index(self.state.indicator.char)
-            self.state.indicator.char = chars[(idx + 1) % len(chars)]
-        except ValueError:
-            self.state.indicator.char = chars[0]
+        if self.state.indicator.mode == "thinking":
+            chars = config.INDICATOR_CHARS
+            try:
+                idx = chars.index(self.state.indicator.char)
+                self.state.indicator.char = chars[(idx + 1) % len(chars)]
+            except ValueError:
+                self.state.indicator.char = chars[0]
+        else:  # searching
+            self.state.indicator.char = config.SEARCH_INDICATOR_CHAR
+            cycle = config.SEARCH_COLOR_CYCLE
+            self.state.indicator.color_idx = (self.state.indicator.color_idx + 1) % len(cycle)
 
         self._update_indicator_ui()
         self.root.after(700, self._toggle_indicator)
 
     def _update_indicator_ui(self):
-        """Updates the indicator symbol in the chat display."""
+        """Updates the indicator symbol and color in the chat display."""
         if not self.state.indicator.active:
             return
         self.ui.chat.display.config(state='normal')
         try:
+            # Update the color if searching
+            color = Theme.INDICATOR_COLOR
+            if self.state.indicator.mode == "searching":
+                color = config.SEARCH_COLOR_CYCLE[self.state.indicator.color_idx]
+            self.ui.chat.display.tag_config("indicator", foreground=color)
+
             # Replace only the symbol character, preserving the trailing space
             self.ui.chat.display.delete("assistant_msg_start", "assistant_msg_start + 1 chars")
             self.ui.chat.display.insert(

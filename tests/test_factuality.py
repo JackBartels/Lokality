@@ -1,7 +1,6 @@
 """
 Unit tests for factuality and search triggering logic.
 """
-import json
 import unittest
 from datetime import datetime
 from unittest.mock import patch
@@ -18,25 +17,31 @@ class TestFactuality(BaseAssistantTest):
         self.assistant = LocalChatAssistant()
         self.assistant.messages = []
 
-    @patch('local_assistant.SearchEngine.web_search')
-    def test_search_triggered_for_factual_query(self, mock_search):
+    def test_search_triggered_for_factual_query(self):
         """Test that search is triggered for factual queries."""
-        # Mock LLM decision to search
-        self.mocks['client'].generate.return_value = {
-            'response': json.dumps({"action": "search", "query": "price of gold"})
+        # 1. Search Gatekeeper (generate)
+        self.mocks['client'].generate.return_value = {"response": "YES"}
+        # 2. Search Decision (chat)
+        self.mocks['client'].chat.return_value = {
+            "message": {"content": '{"action": "search", "query": "price of gold"}'}
         }
-        mock_search.return_value = "Gold is $2000"
 
-        res = self.assistant.decide_and_search("What is the current price of gold?")
+        with patch("search_engine.SearchEngine.web_search") as mock_search:
+            mock_search.return_value = "Gold is $2000."
+            # Longer input to avoid heuristic
+            query = "What is the current price of gold on the global market today?"
+            res = self.assistant.decide_and_search(query)
 
-        self.assertIn("Gold is $2000", res)
-        # Verify call
-        mock_search.assert_called_once_with("price of gold 2026-01-02")
+            self.assertIsNotNone(res)
+            self.assertIn("Gold is $2000", res)
+            mock_search.assert_called_once()
 
     @patch('local_assistant.SearchEngine.web_search')
     def test_search_not_triggered_for_greeting(self, mock_search):
         """Test that search is not triggered for greetings."""
-        self.mocks['client'].generate.return_value = {'response': '{"action": "done"}'}
+        self.mocks['client'].chat.return_value = {
+            "message": {"content": '{"action": "done", "query": ""}'}
+        }
 
         res = self.assistant.decide_and_search("Hello, how are you?")
 
@@ -46,7 +51,9 @@ class TestFactuality(BaseAssistantTest):
     @patch('local_assistant.SearchEngine.web_search')
     def test_search_not_triggered_for_common_knowledge(self, mock_search):
         """Test that search is not triggered for common knowledge."""
-        self.mocks['client'].generate.return_value = {'response': '{"action": "done"}'}
+        self.mocks['client'].chat.return_value = {
+            "message": {"content": '{"action": "done", "query": ""}'}
+        }
 
         res = self.assistant.decide_and_search("What is the freezing point of water?")
 

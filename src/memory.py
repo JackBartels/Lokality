@@ -62,7 +62,8 @@ class MemoryStore:
     def _init_db(self):
         """Initializes the database schema and FTS5 triggers."""
         try:
-            with self._get_conn() as conn:
+            conn = self._get_conn()
+            with self._lock:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=NORMAL")
                 conn.execute("PRAGMA cache_size=-2000")
@@ -92,10 +93,14 @@ class MemoryStore:
                             INSERT INTO memory_fts(rowid, entity, fact) VALUES (new.id, new.entity, new.fact);
                         END;
                     """)
-                    conn.execute(
-                        "INSERT OR IGNORE INTO memory_fts(rowid, entity, fact) "
-                        "SELECT id, entity, fact FROM memory"
-                    )
+
+                    # Only sync if FTS table is empty but memory has data
+                    cursor = conn.execute("SELECT COUNT(*) FROM memory_fts")
+                    if cursor.fetchone()[0] == 0:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO memory_fts(rowid, entity, fact) "
+                            "SELECT id, entity, fact FROM memory"
+                        )
                 except sqlite3.OperationalError:
                     pass
 
@@ -132,6 +137,9 @@ class MemoryStore:
                     self.db_path, timeout=10, check_same_thread=False
                 )
                 self._conn.row_factory = sqlite3.Row
+                # Set performance pragmas immediately on connection
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA synchronous=NORMAL")
             return self._conn
 
     def close(self):

@@ -42,22 +42,24 @@ Lokality is a privacy-focused desktop AI assistant powered by local models, via 
 - **Hardware-Aware Auto-Initialization**: On first run, Lokality scans your system VRAM and pulls the most optimal model for your hardware with real-time progress feedback.
 - **Intelligent Long-Term Memory**: Automatically remembers facts about you to provide personalized assistance in future conversations.
 - **Data Privacy**: All memories are stored locally in a private database that you control.
-- **Real-Time Web Search**: The assistant can browse the internet to answer questions about current events.
+- **Multi-Stage Real-Time Search**: The assistant uses a sophisticated pipeline to browse the internet, including Wikipedia lookups and specialized tools for weather, news, and finance.
+- **Performance Profiling**: Real-time breakdown of internal task timing (Search, Memory, LLM response) to visualize assistant performance.
 - **Smart Memory Management**: A user-friendly confirmation dialog prevents accidental memory erasure and includes a "Don't ask again" option for power users.
 - **Dynamic Performance Tuning**: Automatically adjusts model parameters based on the complexity of your request to ensure fast and accurate responses.
 - **Model & System Stats**: A live info bar displays the current model, memory usage, and system resource consumption (RAM/VRAM).
-- **Modern GUI**: A sleek interface with smooth animations, distinct message styling, and a responsive layout.
-- **Advanced Markdown**: Full support for rich text including headings, nested lists, blockquotes, tables, and interactive links.
-- **Persistent Settings**: Your preferences (like debug mode and info panel visibility) are saved automatically between sessions.
+- **Modern GUI**: A sleek interface with smooth animations, distinct message styling, a "Jump to latest" button, and a responsive layout.
+- **Advanced Markdown**: Full support for rich text including headings, nested lists, blockquotes, tables, and code blocks with one-click "Copy" functionality.
+- **Persistent Settings**: Your preferences (like debug mode, info panel visibility, and selected model) are saved automatically between sessions.
 
 ## Available Commands
 - `/bypass <prompt>`: Send a raw prompt directly to the Ollama CLI (bypass assistant logic).
-- `/clear`: Reset current conversation history.
+- `/clear`: Reset current conversation history and search cache.
 - `/debug`: Toggle debug mode to show internal logs and process information in the console.
-- `/forget`: Permanently erase the long-term memory database.
+- `/forget`: Permanently erase the long-term memory database (requires confirmation).
 - `/help`: View all available commands with descriptions.
 - `/info`: Toggle the model and system statistics panel.
-- `/model`: Open a sidebar to switch between your installed Ollama models.
+- `/model`: Toggle the model selection sidebar to switch between installed models.
+- `/profiler`: Toggle the performance profiler panel.
 - `/exit`: Terminate the application.
 
 ## Compatibility

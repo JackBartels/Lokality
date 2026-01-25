@@ -1,7 +1,6 @@
 """
 Unit tests for the LocalChatAssistant class.
 """
-import json
 import unittest
 from unittest.mock import patch
 from memory import MemoryStore
@@ -29,60 +28,126 @@ class TestLocalChatAssistant(BaseAssistantTest):
         self.assertIn("Saturday, December 27, 2025", self.assistant.system_prompt)
         self.assertIn("10:30 AM", self.assistant.system_prompt)
 
-    @patch('local_assistant.SearchEngine.web_search')
-    def test_decide_and_search_yes(self, mock_web_search):
+    def test_decide_and_search_yes(self):
         """Test that search is performed when LLM decides so."""
-        # Mock LLM decision to search
-        self.mocks['client'].generate.return_value = {
-            'response': json.dumps({"action": "search", "query": "What is the weather?"})
+        # Mock Search decision
+        self.mocks['client'].chat.return_value = {
+            "message": {"content": '{"action": "search", "query": "weather today", "type": "none"}'}
         }
-        mock_web_search.return_value = "It is sunny."
 
-        result = self.assistant.decide_and_search("What is the weather?")
+        with patch("search_engine.SearchEngine.web_search") as mock_search, \
+             patch("search_engine.SearchEngine.wikipedia_search") as mock_wiki:
+            mock_wiki.return_value = None
+            mock_search.return_value = "It is sunny."
+            # Use longer input to avoid skip_llm heuristic
+            query = "Please check the current weather in New York City."
+            result = self.assistant.decide_and_search(query)
 
-        self.assertIn("It is sunny.", result)
-        self.assertIn("--- Search for 'What is the weather? 2025-12-27' ---", result)
-        # Verify call while ignoring potential warmup calls in background
-        calls = [
-            c for c in mock_web_search.call_args_list if "What is the weather? 2025-12-27" in str(c)
-        ]
-        self.assertTrue(len(calls) > 0)
+            self.assertIsNotNone(result)
+            self.assertIn("sunny", result)
+            mock_search.assert_called_once()
 
-    @patch('local_assistant.SearchEngine.web_search')
-    @patch('local_assistant.SearchEngine.scrape_url')
-    def test_decide_and_search_with_scrape(self, mock_scrape, mock_web_search):
+    def test_decide_and_search_weather_routing(self):
+        """Test that weather queries are routed to SpecializedSearch."""
+        # Mock Search decision
+        self.mocks['client'].chat.return_value = {
+            "message": {"content": '{"action": "search", "query": "New York", "type": "weather"}'}
+        }
+
+        with patch("specialized_search.SpecializedSearch.get_weather") as mock_weather:
+            mock_weather.return_value = "It is 72 degrees and sunny in New York."
+
+            result = self.assistant.decide_and_search("What is the weather in New York?")
+
+            self.assertIsNotNone(result)
+            self.assertIn("72 degrees", result)
+            mock_weather.assert_called_once_with("New York")
+
+    def test_decide_and_search_news_routing(self):
+        """Test that news queries are routed to SpecializedSearch."""
+        # Mock Search decision
+        self.mocks['client'].chat.return_value = {
+            "message": {"content": '{"action": "search", "query": "AI news", "type": "news"}'}
+        }
+
+        with patch("specialized_search.SpecializedSearch.get_news") as mock_news:
+            mock_news.return_value = "Latest AI news: Gemma 3 released."
+
+            result = self.assistant.decide_and_search("Search for latest AI news.")
+
+            self.assertIsNotNone(result)
+            self.assertIn("Gemma 3", result)
+            mock_news.assert_called_once_with("AI news")
+
+    def test_decide_and_search_with_scrape(self):
         """Test search and scrape workflow."""
-        # Mock 1: Initial search decision
-        # Mock 2: Scrape decision
-        # Mock 3: Distillation
-        # Note: warmup generate calls might happen, so we use side_effect
-        responses = [
-            {'response': json.dumps(
-                {"action": "search", "query": "What is the weather in London?"}
-            )},
-            {'response': json.dumps({"action": "scrape", "url": "https://weather.com/london"})},
-            {'response': "Relevant: It is 20°C and sunny in London."}
+        # generate: 1. Distillation
+        self.mocks['client'].generate.side_effect = [
+            {"response": "Extracted fact."} # Distillation
+        ]
+        # chat: 1. Search Decision, 2. Scrape Decision
+        self.mocks['client'].chat.side_effect = [
+            {"message": {"content": (
+                '{"action": "search", "query": "London weather", "type": "none"}'
+            )}},
+            {"message": {"content": '{"action": "scrape", "url": "https://weather.com"}'}}
         ]
 
-        # Helper to return side effects while ignoring warmup
-        def side_effect_handler(*_args, **kwargs):
-            if kwargs.get('prompt') == "":
-                return {'response': ''} # Handle warmup
-            return responses.pop(0)
+        with patch("search_engine.SearchEngine.web_search") as mock_search, \
+             patch("search_engine.SearchEngine.scrape_url") as mock_scrape, \
+             patch("search_engine.SearchEngine.wikipedia_search") as mock_wiki:
 
-        self.mocks['client'].generate.side_effect = side_effect_handler
-        mock_web_search.return_value = (
-            "Source: https://weather.com/london\nSnippet: It might rain."
-        )
-        mock_scrape.return_value = (
-            "<html>Large noisy page about London... 20°C and sunny...</html>"
-        )
+            mock_wiki.return_value = None
+            mock_search.return_value = "Source: https://weather.com\nSnippet: Check London weather."
+            mock_scrape.return_value = "Detailed weather report."
 
-        result = self.assistant.decide_and_search("What is the weather in London?")
+            # Longer input to avoid heuristic
+            query = "What is the detailed weather forecast for London right now?"
+            result = self.assistant.decide_and_search(query)
 
-        self.assertIn("Relevant: It is 20°C and sunny in London.", result)
-        self.assertIn("--- Search for 'What is the weather in London? 2025-12-27' ---", result)
-        mock_scrape.assert_called_once_with("https://weather.com/london")
+            self.assertIsNotNone(result)
+            self.assertIn("Extracted fact.", result)
+            mock_search.assert_called_once()
+            mock_scrape.assert_called_once_with("https://weather.com")
+
+    def test_wikipedia_fallback(self):
+        """Test that search falls back to Wikipedia."""
+        # Mock Search decision
+        self.mocks['client'].chat.return_value = {
+            "message": {"content": '{"action": "search", "query": "Python"}'}
+        }
+
+        with patch("search_engine.SearchEngine.wikipedia_search") as mock_wiki:
+            mock_wiki.return_value = "Source: wiki\nTitle: Python\nSummary: A language."
+
+            result = self.assistant.decide_and_search("Tell me about Python")
+
+            self.assertIsNotNone(result)
+            self.assertIn("Wikipedia Result", result)
+            self.assertIn("A language", result)
+            mock_wiki.assert_called_once()
+
+    def test_specialized_to_web_fallback(self):
+        """Test that specialized search falls back to Web Search instead of Wikipedia on failure."""
+        # Mock Search decision
+        self.mocks['client'].chat.return_value = {
+            "message": {"content": '{"action": "search", "query": "New York", "type": "weather"}'}
+        }
+
+        with patch("specialized_search.SpecializedSearch.get_weather") as mock_weather, \
+             patch("search_engine.SearchEngine.wikipedia_search") as mock_wiki, \
+             patch("search_engine.SearchEngine.web_search") as mock_web:
+            mock_weather.return_value = None
+            mock_web.return_value = "DDG weather results"
+
+            result = self.assistant.decide_and_search("What's the weather in New York?")
+
+            self.assertIsNotNone(result)
+            self.assertIn("Search for 'weather in New York", result)
+            self.assertIn("DDG weather results", result)
+            mock_weather.assert_called_once()
+            mock_wiki.assert_not_called()
+            mock_web.assert_called_once()
 
     def test_accuracy_context_incorporation(self):
         """Test that identity and context are incorporated into system prompt."""
@@ -98,8 +163,10 @@ class TestLocalChatAssistant(BaseAssistantTest):
 
     def test_decide_and_search_no(self):
         """Test that no search is performed when LLM decides so."""
-        # Mock LLM decision NOT to search (JSON format)
-        self.mocks['client'].generate.return_value = {'response': '{"action": "done"}'}
+        # Search decision returns 'done'
+        self.mocks['client'].chat.return_value = {
+            "message": {"content": '{"action": "done"}'}
+        }
 
         result = self.assistant.decide_and_search("Hello")
 
@@ -110,11 +177,37 @@ class TestLocalChatAssistant(BaseAssistantTest):
         self.assistant.clear_long_term_memory()
         self.mocks['memory_instance'].clear.assert_called_once()
 
+    @patch('local_assistant.LocalChatAssistant._get_search_decision')
+    def test_prepare_turn_parallel_execution(self, mock_decision):
+        """Test that prepare_turn executes memory and decision logic."""
+        mock_decision.return_value = {"action": "done"}
+        self.mocks['memory_instance'].get_relevant_facts.return_value = [{'id': 1, 'fact': 'test'}]
+
+        # Reset mock to ignore the call from __init__
+        self.mocks['memory_instance'].get_relevant_facts.reset_mock()
+
+        res = self.assistant.prepare_turn("Hello")
+
+        self.mocks['memory_instance'].get_relevant_facts.assert_called_once()
+        mock_decision.assert_called_once()
+        self.assertEqual(res['facts'], [{'id': 1, 'fact': 'test'}])
+        self.assertIsNone(res['search_context'])
+
+    @patch('local_assistant.LocalChatAssistant.decide_and_search')
+    @patch('local_assistant.LocalChatAssistant._get_search_decision')
+    def test_prepare_turn_triggers_search(self, mock_decision, mock_decide):
+        """Test that prepare_turn triggers full search if decision approves."""
+        mock_decision.return_value = {"action": "search", "query": "weather"}
+        mock_decide.return_value = "Search Results"
+
+        res = self.assistant.prepare_turn("Current weather")
+
+        mock_decide.assert_called_once()
+        self.assertEqual(res['search_context'], "Search Results")
+
     @patch('local_assistant.MemoryManager.extract_facts')
     def test_perform_memory_update_integration(self, mock_extract):
         """Test memory update integration."""
-        # Setup: Real MemoryStore (in-memory) for integration feel,
-        # but we already mocked it in setUp. Let's use a real one for this specific test.
         real_memory = MemoryStore(db_path=":memory:")
         self.assistant.memory = real_memory
 
@@ -122,7 +215,6 @@ class TestLocalChatAssistant(BaseAssistantTest):
             {'op': 'add', 'entity': 'User', 'fact': 'Lives in Tokyo'}
         ]
 
-        # This calls the logic that filters and commits to DB
         self.assistant.perform_memory_update("I live in Tokyo", "That's great!")
 
         facts = real_memory.get_all_facts()

@@ -1,7 +1,10 @@
 ollama
 duckduckgo-search
-mistune
+trafilatura
+yfinance
+gnews
+python-weather
 psutil
-beautifulsoup4
-requests
+mistune
+wikipedia
 pylint

@@ -2,6 +2,8 @@
 Utility functions for Lokality.
 Handles environment checks, resource detection, and GUI helpers.
 """
+from dataclasses import dataclass
+from typing import Optional, Any
 import glob
 import os
 import re
@@ -14,6 +16,34 @@ import ollama
 
 import config
 from logger import logger
+
+@dataclass
+class CanvasConfig:
+    """Configuration for canvas region updates."""
+    canvas: Any
+    bg_id: int
+    size: tuple[int, int]
+    radius: int
+    style: tuple[str, int, str]
+    win_id: Optional[int] = None
+    pad: tuple[float, float] = (0, 0)
+
+@dataclass
+class SidebarCallbacks:
+    """Callbacks for sidebar interactions."""
+    on_switch: Any
+    on_close: Any
+    on_resize: Any
+
+@dataclass
+class SidebarConfig:
+    """Configuration for model sidebar construction."""
+    parent: Any
+    theme: Any
+    fonts: dict
+    models: list
+    current_model: str
+    callbacks: SidebarCallbacks
 
 def thread_excepthook(args):
     """Global hook for catching uncaught exceptions in threads."""
@@ -157,7 +187,7 @@ def _check_uma_fallback(vram_mb, ram_mb):
                     if vendor_id in uma_vendors:
                         found_uma = True
                         logger.info(
-                            "Integrated/UMA GPU detected (%s). Using shared system RAM.",
+                            "Integrated/UMA GPU detected (%s). Using system RAM.",
                             vendor_id
                         )
                         break
