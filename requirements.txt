@@ -7,3 +7,4 @@ python-weather
 psutil
 mistune
 wikipedia
+pylint
