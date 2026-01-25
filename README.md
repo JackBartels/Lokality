@@ -1,4 +1,4 @@
-# Lokality (v0.1.3)
+# Lokality (v0.2.0)
 
 ## Description
 Lokality is a privacy-focused desktop AI assistant powered by local models, via Ollama, and built with Python. It provides a modern chat interface for use with local models, equipping them with real-time internet access, long-term memory capabilities, and many other useful features.
