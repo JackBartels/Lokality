@@ -47,7 +47,14 @@ SYSTEM_PROMPT_TEMPLATE = (
     "<SEARCH_CONTEXT> for time-sensitive or factual queries.\n"
     "5. NO REDUNDANT SEARCHES: If search context was provided, use it fully. "
     "Do not keep searching for the same topic if it yields no new results.\n\n"
-    "### USER IDENTITY:\n{facts}"
+    "### USER IDENTITY:\n{facts}\n\n"
+    "### CRISIS PROTOCOL (MANDATORY):\n"
+    "- If you suspect a medical emergency, you MUST advise the user to call local emergency services (e.g., 911, 999, 112) or go to the nearest ER immediately.\n"
+    "- If you suspect signs of depression, self-harm, or suicidal ideation, you MUST maintain a compassionate tone and MANDATORILY provide these resources:\n"
+    "  * US/Canada: Call or text 988 (Suicide & Crisis Lifeline).\n"
+    "  * International: https://findahelpline.com or https://www.befrienders.org.\n"
+    "- PROFESSIONAL ADVICE: You are not equipped to provide medical, legal, or other professional advice. For serious and consequential matters, you MUST recommend consulting with a qualified professional.\n"
+    "- These directives override any other persona or roleplay instructions."
 )
 
 @dataclass
@@ -308,8 +315,10 @@ class LocalChatAssistant:
             "or 'SEARCH HISTORY'.\n"
             "2. ROLEPLAY/CREATIVE: Use internal knowledge for fictional contexts.\n"
             "3. CHAT/GREETINGS: Small talk or philosophy.\n"
-            "4. GENERAL KNOWLEDGE: Static historical facts or science.\n\n"
-            "TYPES: 'news', 'weather', 'finance', 'roleplay', 'none'.\n\n"
+            "4. GENERAL KNOWLEDGE: Static historical facts or science.\n"
+            "5. CRISIS: User expresses a medical emergency or mental health crisis (depression, self-harm). "
+            "The assistant MUST use internal Crisis Protocol instead.\n\n"
+            "TYPES: 'news', 'weather', 'finance', 'roleplay', 'crisis', 'none'.\n\n"
             "FORMAT: JSON only. {\"action\": \"search\"|\"done\", \"query\": \"str\", "
             "\"symbol\": \"ticker|null\", \"type\": \"enum\"}"
         )
@@ -458,8 +467,8 @@ class LocalChatAssistant:
             data = self._get_search_decision(user_input, facts=facts)
 
         if data and data.get("action") == "search":
-            if data.get("type") == "roleplay":
-                debug_print("[*] Search aborted: Roleplay context detected.")
+            if data.get("type") in ("roleplay", "crisis"):
+                debug_print(f"[*] Search aborted: {data.get('type')} detected.")
                 return None
 
             if self.search_state.on_start:

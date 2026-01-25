@@ -499,11 +499,14 @@ class AssistantApp:
                     facts = prep_result["facts"]
                     ctx = prep_result["search_context"]
 
-                    # ROLEPLAY: Maximize parameters if RP detected
-                    if prep_result.get("search_type") == "roleplay":
+                    # ROLEPLAY/CRISIS detection
+                    stype = prep_result.get("search_type")
+                    if stype == "roleplay":
                         debug_print("[*] Roleplay detected: Maximizing creativity parameters.")
                         complexity['params']['temperature'] = 1.0
                         complexity['params']['top_p'] = 1.0
+                    elif stype == "crisis":
+                        debug_print("[*] Crisis detected: Prioritizing safety protocol.")
 
                     self.state.assistant.update_system_prompt(
                         user_input, facts=facts
