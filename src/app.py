@@ -10,8 +10,8 @@ import sys
 import threading
 import tkinter as tk
 import traceback
-from tkinter import font
 
+from PIL import Image, ImageTk
 import mistune
 import ollama
 from mistune.plugins.formatting import superscript, subscript
@@ -30,8 +30,9 @@ from app_state import AppState, AppUI, SLASH_COMMANDS
 from ui_components import InfoPanel, ProfilerPanel
 from ui_helpers import (
     update_canvas_region, update_lower_border, highlight_commands, handle_tab,
-    adjust_input_height, configure_chat_tags, insert_chat_separator, setup_jump_button,
-    build_model_sidebar, handle_link_tooltip, CustomScrollbar
+    adjust_input_height, configure_chat_tags, insert_chat_separator,
+    build_model_sidebar, handle_link_tooltip, build_chat_area, StyleConfig,
+    build_input_area
 )
 from ui_dialogs import show_forget_dialog
 from utils import (
@@ -44,7 +45,6 @@ from utils import (
     format_error_msg,
     get_ollama_client,
     info_print,
-    round_rectangle,
     thread_excepthook,
     verify_env_health,
 )
@@ -78,6 +78,7 @@ class AssistantApp:
 
         self._setup_markdown()
         self._setup_ui()
+        self._setup_window_icon()
 
         self.root.bind("<Escape>", self._cancel_generation)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -93,23 +94,24 @@ class AssistantApp:
     def _setup_markdown(self):
         """Initializes the markdown engine and parser."""
         try:
-            self.markdown_engine = MarkdownEngine(
+            self.ui.markdown.engine = MarkdownEngine(
                 None, self._handle_tooltip
             )
-            self.md_parser = mistune.create_markdown(
+            self.ui.markdown.parser = mistune.create_markdown(
                 renderer=None,
                 plugins=['table', 'strikethrough', superscript, subscript]
             )
         except (ImportError, AttributeError):
-            self.markdown_engine = MarkdownEngine(
+            self.ui.markdown.engine = MarkdownEngine(
                 None, self._handle_tooltip
             )
-            self.md_parser = lambda x: [{"type": "text", "text": x}]
+            self.ui.markdown.parser = lambda x: [{"type": "text", "text": x}]
 
     def _initialize_async(self):
         """Heavy initialization tasks run in background."""
         try:
             self.state.assistant = local_assistant.LocalChatAssistant()
+            self.state.assistant.stop_signal = lambda: self.state.process.stop_generation
             self.state.assistant.on_search_start = lambda: self.state.msg_queue.put(
                 ("search_start", None, None)
             )
@@ -136,6 +138,22 @@ class AssistantApp:
         if config.DEBUG:
             traceback.print_exception(exc, val, tback)
 
+    def _setup_window_icon(self):
+        """Loads and sets the application window icon."""
+        try:
+            # Use absolute path to the res/icon.png
+            icon_path = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)),
+                "res", "icon.png"
+            )
+            if os.path.exists(icon_path):
+                img = Image.open(icon_path)
+                # Keep a reference to prevent garbage collection
+                self.ui.icon_img = ImageTk.PhotoImage(img)
+                self.root.iconphoto(True, self.ui.icon_img)
+        except (OSError, tk.TclError, ImportError) as exc:
+            debug_print(f"Failed to load window icon: {exc}")
+
     def _setup_ui(self):
         """Configures the main window layout and components."""
         self.root.grid_rowconfigure(0, weight=0) # Profiler row
@@ -143,20 +161,20 @@ class AssistantApp:
         self.root.grid_columnconfigure(0, weight=0) # Sidebar column
         self.root.grid_columnconfigure(1, weight=1) # Chat column
 
-        self.ui.profiler_panel = ProfilerPanel(self.root, Theme, self.fonts)
-        self.ui.profiler_panel.grid(row=0, column=0, columnspan=2, sticky="ew")
+        self.ui.panels.profiler = ProfilerPanel(self.root, Theme, self.fonts)
+        self.ui.panels.profiler.grid(row=0, column=0, columnspan=2, sticky="ew")
         if not self.state.ui_state.show_profiler:
-            self.ui.profiler_panel.grid_remove()
+            self.ui.panels.profiler.grid_remove()
 
         self._setup_sidebar()
         self._setup_chat_area()
-        self.markdown_engine.text_widget = self.ui.chat.display
+        self.ui.markdown.engine.text_widget = self.ui.chat.display
 
-        self.ui.info_panel = InfoPanel(self.root, Theme, self.fonts)
-        self.ui.info_panel.show_info = self.state.ui_state.show_info
-        self.ui.info_panel.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=0)
+        self.ui.panels.info = InfoPanel(self.root, Theme, self.fonts)
+        self.ui.panels.info.show_info = self.state.ui_state.show_info
+        self.ui.panels.info.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=0)
         if not self.state.ui_state.show_info:
-            self.ui.info_panel.grid_remove()
+            self.ui.panels.info.grid_remove()
 
         self._setup_input_area()
         self._bind_events()
@@ -172,92 +190,23 @@ class AssistantApp:
 
     def _setup_chat_area(self):
         """Sets up the scrollable chat display area."""
-        self.ui.chat.canvas = tk.Canvas(
-            self.root, bg=Theme.BG_COLOR, highlightthickness=0
-        )
-        self.ui.chat.canvas.grid(
-            row=1, column=1, sticky="nsew", padx=10, pady=(10, 7)
-        )
-        self.ui.chat.bg_id = round_rectangle(
-            self.ui.chat.canvas, (4, 4, 10, 10), radius=25,
-            outline=Theme.ACCENT_COLOR, width=6, fill=Theme.BG_COLOR
-        )
-
-        self.ui.chat.inner = tk.Frame(self.ui.chat.canvas, bg=Theme.BG_COLOR)
-        self.ui.chat.window_id = self.ui.chat.canvas.create_window(
-            10, 10, anchor="nw", window=self.ui.chat.inner
-        )
-        self.ui.chat.inner.grid_rowconfigure(0, weight=1)
-        self.ui.chat.inner.grid_columnconfigure(0, weight=1)
-
-        self.ui.chat.display = tk.Text(
-            self.ui.chat.inner, state='disabled', wrap='word',
-            font=self.fonts["base"], bg=Theme.BG_COLOR, fg=Theme.FG_COLOR,
-            insertbackground=Theme.FG_COLOR, borderwidth=0,
-            highlightthickness=0, padx=15, pady=15,
-            spacing1=1, spacing2=3, spacing3=1
-        )
-        self.ui.chat.display.grid(row=0, column=0, sticky="nsew")
-
-        self.ui.chat.scrollbar = CustomScrollbar(
-            self.ui.chat.inner, command=self.ui.chat.display.yview,
-            bg=Theme.BG_COLOR
-        )
-        self.ui.chat.scrollbar.grid(row=0, column=1, sticky="ns", pady=15)
-
-        # Modified scroll command to track auto-scroll state
         def on_display_scroll(*args):
             self.ui.chat.scrollbar.set(*args)
             self._check_scroll_position()
 
-        self.ui.chat.display.config(yscrollcommand=on_display_scroll)
-
-        self.ui.chat.jump_btn_canvas = setup_jump_button(
-            self.root, self.fonts, self.scroll_to_bottom
-        )
+        callbacks = {
+            "on_scroll": on_display_scroll,
+            "on_manual_scroll": self._on_manual_scroll,
+            "scroll_to_bottom": self.scroll_to_bottom
+        }
+        style = StyleConfig(theme=Theme, fonts=self.fonts)
+        build_chat_area(self.root, self.ui.chat, style, callbacks)
 
         self._configure_tags()
-        self.ui.chat.display.mark_set("assistant_msg_start", "1.0")
-        self.ui.chat.display.mark_gravity("assistant_msg_start", tk.LEFT)
-
-        # Bind user scroll events to disable auto-scroll
-        self.ui.chat.display.bind("<MouseWheel>", self._on_manual_scroll)
-        self.ui.chat.display.bind("<Button-4>", self._on_manual_scroll)
-        self.ui.chat.display.bind("<Button-5>", self._on_manual_scroll)
-        self.ui.chat.display.bind("<B1-Motion>", self._on_manual_scroll)
 
     def _setup_input_area(self):
         """Sets up the user input field at the bottom."""
-        line_h = font.Font(font=self.fonts["base"]).metrics('linespace')
-        self.ui.input.canvas = tk.Canvas(
-            self.root, bg=Theme.BG_COLOR, highlightthickness=0,
-            height=line_h + 20
-        )
-        self.ui.input.canvas.grid(
-            row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=(7, 20)
-        )
-        self.ui.input.bg_id = round_rectangle(
-            self.ui.input.canvas, (4, 4, 10, 10), radius=20,
-            outline=Theme.COMMAND_COLOR, width=6, fill=Theme.INPUT_BG
-        )
-        self.ui.input.inner = tk.Frame(self.ui.input.canvas, bg=Theme.INPUT_BG)
-        self.ui.input.window_id = self.ui.input.canvas.create_window(
-            5, 5, anchor="nw", window=self.ui.input.inner
-        )
-        self.ui.input.inner.grid_columnconfigure(0, weight=1)
-        self.ui.input.inner.grid_rowconfigure(0, weight=1)
-
-        self.ui.input.field = tk.Text(
-            self.ui.input.inner, height=1, width=1, wrap='word',
-            font=self.fonts["base"], bg=Theme.INPUT_BG, fg=Theme.FG_COLOR,
-            insertbackground=Theme.FG_COLOR, borderwidth=0,
-            highlightthickness=0, padx=15, pady=10
-        )
-        self.ui.input.field.grid(row=0, column=0, sticky="nsew")
-        self.ui.input.field.tag_config(
-            "command_highlight", foreground=Theme.SLASH_COLOR,
-            font=self.fonts["bold"]
-        )
+        build_input_area(self.root, self.ui.input, Theme, self.fonts)
 
     def _configure_tags(self):
         """Sets up text tags for different message types."""
@@ -297,7 +246,7 @@ class AssistantApp:
             radius=25,
             style=(Theme.ACCENT_COLOR, 6, Theme.BG_COLOR),
             win_id=self.ui.chat.window_id,
-            pad=(12, 12)
+            pad=(15, 15)
         )
         self.ui.chat.bg_id = self._update_canvas_region(cfg)
 
@@ -319,12 +268,12 @@ class AssistantApp:
         """Disables auto-scroll when user interacts with the chat history."""
         # Only disable if user actually scrolls UP
         if self.ui.chat.display.yview()[1] < 0.99:
-            self.state.auto_scroll = False
+            self.state.ui_state.auto_scroll = False
             self._check_scroll_position()
 
     def scroll_to_bottom(self):
         """Scrolls the chat display to the very bottom."""
-        self.state.auto_scroll = True
+        self.state.ui_state.auto_scroll = True
         self.ui.chat.display.see(tk.END)
         self._check_scroll_position()
 
@@ -335,9 +284,9 @@ class AssistantApp:
 
         is_at_bottom = self.ui.chat.display.yview()[1] >= 0.99
         if is_at_bottom:
-            self.state.auto_scroll = True
+            self.state.ui_state.auto_scroll = True
             self.ui.chat.jump_btn_canvas.place_forget()
-        elif not self.state.auto_scroll:
+        elif not self.state.ui_state.auto_scroll:
             # Place relative to the container. Since jump_btn_canvas parent is ui.chat.canvas,
             # and ui.chat.canvas fills the area, this works.
             # However, ensure it's on top. 'place' usually puts it on top.
@@ -416,6 +365,10 @@ class AssistantApp:
 
     def _run_streaming_chat(self, user_input, complexity, msgs):
         """Handles the streaming response from the LLM."""
+        if self.state.process.stop_generation:
+            self.state.msg_queue.put(("text", " [Interrupted]", "cancelled"))
+            return
+
         Profiler().start("Response Generation")
         try:
             full_resp = ""
@@ -490,12 +443,21 @@ class AssistantApp:
             def run_assistant():
                 try:
                     complexity = ComplexityScorer.analyze(user_input)
+                    if self.state.process.stop_generation:
+                        self.state.msg_queue.put(("text", " [Interrupted]", "cancelled"))
+                        return
+
                     skip_search = complexity['level'] == ComplexityScorer.LEVEL_MINIMAL
 
                     # PARALLEL STEP: Retrieve memory facts and check search
                     prep_result = self.state.assistant.prepare_turn(
                         user_input, skip_search=skip_search
                     )
+
+                    if self.state.process.stop_generation:
+                        self.state.msg_queue.put(("text", " [Interrupted]", "cancelled"))
+                        return
+
                     facts = prep_result["facts"]
                     ctx = prep_result["search_context"]
 
@@ -537,7 +499,7 @@ class AssistantApp:
     def _cmd_clear(self, _):
         if self.state.assistant:
             self.state.assistant.clear_conversation()
-            self.markdown_engine.clear()
+            self.ui.markdown.engine.clear()
             info_print("Conversation history cleared.")
             self.state.msg_queue.put(("clear", None, None))
         self.state.msg_queue.put(("enable", None, None))
@@ -582,11 +544,11 @@ class AssistantApp:
         Profiler().enabled = self.state.ui_state.show_profiler
 
         if self.state.ui_state.show_profiler:
-            self.ui.profiler_panel.grid()
+            self.ui.panels.profiler.grid()
             # Immediately show any existing data from the last turn
-            self.ui.profiler_panel.update_data(Profiler().get_latest_data())
+            self.ui.panels.profiler.update_data(Profiler().get_latest_data())
         else:
-            self.ui.profiler_panel.grid_remove()
+            self.ui.panels.profiler.grid_remove()
         self.state.msg_queue.put(("enable", None, None))
 
     def _cmd_help(self, _):
@@ -641,7 +603,7 @@ class AssistantApp:
         self.state.assistant.switch_model(new_model)
         self.settings.set("model_name", new_model)
         info_print(f"Model switched to {new_model}. History cleared.")
-        self.markdown_engine.clear()
+        self.ui.markdown.engine.clear()
         self.state.msg_queue.put(("clear", None, None))
         self._update_info_display()
 
@@ -687,7 +649,7 @@ class AssistantApp:
         try:
             self.ui.chat.display.delete("end-1c linestart", "end-1c")
             self.ui.chat.display.insert("end-1c", text, tag)
-            if self.state.auto_scroll:
+            if self.state.ui_state.auto_scroll:
                 self.ui.chat.display.see(tk.END)
         except tk.TclError:
             pass
@@ -720,8 +682,8 @@ class AssistantApp:
                         "assistant_msg_start", f"{self.state.indicator.char} ", "indicator"
                     )
                 try:
-                    toks = self.md_parser(cur)
-                    self.markdown_engine.render_tokens(toks, "assistant")
+                    toks = self.ui.markdown.parser(cur)
+                    self.ui.markdown.engine.render_tokens(toks, "assistant")
                     self.state.response.last_rendered_len = len(cur)
                 except (ValueError, TypeError):
                     self.ui.chat.display.insert(
@@ -740,8 +702,8 @@ class AssistantApp:
             if tag == "cancelled":
                 self.ui.chat.display.delete("assistant_msg_start", tk.END)
                 try:
-                    toks = self.md_parser(self.state.response.full_text.strip())
-                    self.markdown_engine.render_tokens(toks, "assistant")
+                    toks = self.ui.markdown.parser(self.state.response.full_text.strip())
+                    self.ui.markdown.engine.render_tokens(toks, "assistant")
                 except (ValueError, TypeError):
                     self.ui.chat.display.insert(
                         "end-1c", self.state.response.full_text, "assistant"
@@ -767,7 +729,7 @@ class AssistantApp:
         except (tk.TclError, ValueError) as exc:
             self.ui.chat.display.insert("end-1c", f"\n[GUI Error: {exc}]\n", "error")
         finally:
-            if self.state.auto_scroll:
+            if self.state.ui_state.auto_scroll:
                 self.ui.chat.display.see(tk.END)
             self.ui.chat.display.config(state='disabled')
 
@@ -779,7 +741,7 @@ class AssistantApp:
             if self.ui.chat.display.compare("end-2c", ">", "assistant_msg_start"):
                 if self.ui.chat.display.get("end-2c", "end-1c") == "\n":
                     self.ui.chat.display.delete("end-2c", "end-1c")
-            self._insert_separator(height=40)
+            self._insert_separator(height=24)
             self.ui.chat.display.mark_set("assistant_msg_start", "end-1c")
             self.state.response.full_text = ""
         except tk.TclError:
@@ -831,11 +793,11 @@ class AssistantApp:
 
     def _handle_action_update_info(self, content, _tag):
         """Handles update_info_ui action."""
-        self.ui.info_panel.update_stats(content)
+        self.ui.panels.info.update_stats(content)
 
     def _handle_action_update_profiler(self, content, _tag):
         """Handles update_profiler_ui action."""
-        self.ui.profiler_panel.update_data(content)
+        self.ui.panels.profiler.update_data(content)
 
     def _handle_action_quit(self, _content, _tag):
         """Handles quit action."""
@@ -873,7 +835,7 @@ class AssistantApp:
     def _handle_action_separator(self, _content, _tag):
         """Handles separator action from queue."""
         self.ui.chat.display.config(state='normal')
-        self._insert_separator(height=40)
+        self._insert_separator(height=24)
         self.ui.chat.display.config(state='disabled')
 
     def _handle_action_final_render(self, _content, tag):
@@ -884,7 +846,7 @@ class AssistantApp:
 
     def _handle_action_toggle_info(self, _content, _tag):
         """Handles toggle_info action from queue."""
-        self.state.ui_state.show_info = self.ui.info_panel.toggle()
+        self.state.ui_state.show_info = self.ui.panels.info.toggle()
         self.settings.set("show_info", self.state.ui_state.show_info)
         self._update_info_display()
 

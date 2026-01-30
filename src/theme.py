@@ -31,6 +31,22 @@ CODE_FG = "#F8F8F2"
 TABLE_BG = "#282828"
 TOOLTIP_BG = "#37474F"
 
+def get_ui_scale(root=None):
+    """Returns a scaling factor for UI elements (padding, borders, radius) based on resolution."""
+    if not root:
+        return 1.0
+    try:
+        screen_h = root.winfo_screenheight()
+        # 1080p and below gets a 0.75x scale for UI elements
+        if screen_h <= 1080:
+            return 0.75
+        # 1440p gets 0.85x
+        if screen_h <= 1440:
+            return 0.85
+        return 1.0
+    except (AttributeError, RuntimeError, TypeError):
+        return 1.0
+
 def get_fonts():
     """Returns a dictionary of font definitions."""
     base_family = "Roboto"

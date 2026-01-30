@@ -8,3 +8,4 @@ psutil
 mistune
 wikipedia
 pylint
+Pillow
