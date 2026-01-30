@@ -18,12 +18,11 @@ class TestCommands(unittest.TestCase):
             patch('app.tk.Canvas'),
             patch('app.tk.Text'),
             patch('app.tk.Frame'),
-            patch('app.font.Font'),
-            patch('app.round_rectangle'),
-            patch('app.CustomScrollbar'),
+            patch('app.tk.font.Font'),
             patch('app.MarkdownEngine'),
             patch('app.mistune.create_markdown'),
-            patch('app.local_assistant.LocalChatAssistant')
+            patch('app.local_assistant.LocalChatAssistant'),
+            patch('app.ImageTk.PhotoImage')
         ]
 
         # Start all patchers and get mocks

@@ -44,9 +44,10 @@ class MemoryManager:
     @staticmethod
     def _is_transient_action(fact_lower):
         """Checks if the fact describes an action currently in progress."""
-        # Reject facts describing current actions (e.g., "is walking", "are searching")
-        # Pattern: auxiliary verb (am/is/are/was/were) + word ending in "ing"
-        action_pattern = r'\b(am|is|are|was|were)\b\s+[a-z]+ing\b'
+        # Reject facts describing session-specific or conversational actions.
+        # This matches "is/am/are/was/were" followed by a word ending in "ing"
+        # e.g., "is eating", "was running"
+        action_pattern = r'\b(am|is|are|was|were)\b\s+\w+ing\b'
         return bool(re.search(action_pattern, fact_lower))
 
     @staticmethod
@@ -74,7 +75,7 @@ class MemoryManager:
     def extract_facts(user_input, assistant_response, current_memory_text):
         """Delta-based memory update using structured operations."""
         system_instructions = (
-            "You are a Memory Management Module. Extract enduring facts (relevant in 1+ month).\n\n"
+            "You are a Memory Management Module. Extract significant and enduring facts.\n\n"
             "RULES:\n"
             "1. ENTITY IDENTIFICATION: Identify the SUBJECT of the fact. "
             "Use 'User' ONLY for facts about the user themselves. "
@@ -82,23 +83,26 @@ class MemoryManager:
             "or a clear descriptor (e.g., 'Whiskers', 'User's cat', 'Paris'). "
             "Use 'Assistant' for yourself (Lokality).\n"
             "2. SUBJECT-CENTRIC: The 'entity' field MUST be the specific subject "
-            "the fact is about. Do not default to 'User' if the fact is about "
-            "something or someone else.\n"
-            "3. NO TRANSIENTS: Do not record moods, immediate plans, actions in progress, "
-            "or conversational filler.\n"
-            "4. NO META/SESSION INFO: Do not record what the user 'wants to know', "
-            "'asked about', or 'is looking for' in this chat. "
-            "Ignore search status and chat flow.\n"
-            "5. NO INFERENCE: Record only explicitly stated facts.\n"
-            "6. DEDUPLICATION: Use 'update' or 'remove' ONLY for clear factual corrections. "
-            "These operations must be used VERY SPARINGLY. Prefer adding new distinct details.\n"
+            "the fact is about.\n"
+            "3. NO TRANSIENTS/VOLATILE DATA: Do not record moods, immediate plans, "
+            "or conversational filler. CRITICAL: NEVER record time-sensitive or "
+            "volatile data such as stock prices, current weather, or temporary "
+            "news events. These become outdated quickly and clutter memory.\n"
+            "4. NO SESSION INFO: Ignore search status and chat flow tags.\n"
+            "5. SIGNIFICANCE: Extract ONLY the most significant facts relevant in the "
+            "long term (1+ month). If a fact is likely to change within a week, "
+            "it is NOT enduring.\n"
+            "6. UPDATE/REMOVE PROTOCOL: Only use 'update' or 'remove' when the "
+            "new information DIRECTLY CONTRADICTS or EXPLICITLY REPLACES "
+            "an existing fact. If the new information is just additional detail, "
+            "use 'add' instead (or do nothing if it's minor).\n"
             "7. NO ID, NO UPDATE: If a fact is not in CURRENT MEMORY, you MUST use 'add' "
             "with 'id': null. NEVER use 'update' or 'remove' with 'id': null.\n"
             "8. SELECTIVITY & CAPACITY: Extract ONLY the most significant facts. "
-            "FEWER IS BETTER. You may record 0 facts if nothing is enduring. "
-            "MAX 3 'add' operations per turn.\n\n"
+            "FEWER IS BETTER. Update/remove EXTREMELY SPARINGLY. "
+            "MAX 3 'add' and MAX 1 'update'/'remove' operation per turn.\n\n"
             "FORMAT: JSON object with 'operations' list.\n"
-            "Each op: " 
+            "Each op: "
             "{'op': 'add'|'update'|'remove', 'entity': str, 'fact': str, 'id': int|null}.\n"
             "CRITICAL: Use 'id': null for all 'add' operations. "
             "ID is required and MUST be an integer for all update/remove operations."
@@ -166,14 +170,20 @@ class MemoryManager:
         """Validates the list of operations extracted from the LLM."""
         valid_ops = []
         add_count = 0
+        update_remove_count = 0
         for op in all_ops:
             if not isinstance(op, dict) or 'op' not in op:
                 continue
 
             # Validate ID format (must be integer for update/remove)
             if op['op'] in ['update', 'remove']:
+                if update_remove_count >= 1:
+                    debug_print("[*] Memory: Capacity reached. "
+                                "Skipping additional update/remove op.")
+                    continue
                 try:
                     op['id'] = int(op.get('id'))
+                    update_remove_count += 1
                 except (ValueError, TypeError):
                     debug_print(
                         f"[*] Memory: Filtering op with malformed ID: {op.get('id')}"

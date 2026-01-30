@@ -83,14 +83,14 @@ class TestLocalChatAssistant(BaseAssistantTest):
         """Test search and scrape workflow."""
         # generate: 1. Distillation
         self.mocks['client'].generate.side_effect = [
-            {"response": "Extracted fact."} # Distillation
+            [{"response": "Extracted fact."}] # Distillation (wrapped in list for stream)
         ]
         # chat: 1. Search Decision, 2. Scrape Decision
         self.mocks['client'].chat.side_effect = [
-            {"message": {"content": (
+            [{"message": {"content": (
                 '{"action": "search", "query": "London weather", "type": "none"}'
-            )}},
-            {"message": {"content": '{"action": "scrape", "url": "https://weather.com"}'}}
+            )}}],
+            [{"message": {"content": '{"action": "scrape", "url": "https://weather.com"}'}}]
         ]
 
         with patch("search_engine.SearchEngine.web_search") as mock_search, \

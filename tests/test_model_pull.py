@@ -3,6 +3,7 @@ Unit tests for model pulling logic and system resource detection.
 """
 import unittest
 from unittest.mock import patch, mock_open, MagicMock
+import config
 import local_assistant
 import utils
 from tests.base_test import BaseAssistantTest
@@ -12,6 +13,8 @@ class TestModelPull(BaseAssistantTest):
 
     def setUp(self):
         super().setUp()
+        # Ensure MODEL_NAME is predictable
+        config.MODEL_NAME = "gemma3:4b-it-qat"
         # We will mock resources per test or keep generic patch
         self.patchers['resources'] = patch('local_assistant.get_system_resources')
         self.mocks['resources'] = self.patchers['resources'].start()

@@ -10,9 +10,11 @@ import re
 import subprocess
 import sys
 import traceback
+import math
 
 import psutil
 import ollama
+from PIL import Image, ImageDraw, ImageTk
 
 import config
 from logger import logger
@@ -119,24 +121,149 @@ def info_print(msg):
     logger.info(msg)
     print(msg)
 
-def round_rectangle(canvas, coords, radius=25, **kwargs):
-    """Draws a rounded rectangle on a Tkinter Canvas."""
-    x1, y1, x2, y2 = coords
-    # Ensure radius doesn't exceed dimensions to avoid visual glitches
-    width = abs(x2 - x1)
-    height = abs(y2 - y1)
-    if radius > width // 2:
-        radius = max(1, width // 2)
-    if radius > height // 2:
-        radius = max(1, height // 2)
+# Global cache for PIL images to speed up rendering during resize
+_RECT_CACHE = {}
 
-    pts = [
-        x1+radius, y1, x1+radius, y1, x2-radius, y1, x2-radius, y1, x2, y1,
-        x2, y1+radius, x2, y1+radius, x2, y2-radius, x2, y2-radius, x2, y2,
-        x2-radius, y2, x2-radius, y2, x1+radius, y2, x1+radius, y2, x1, y2,
-        x1, y2-radius, x1, y2-radius, x1, y1+radius, x1, y1+radius, x1, y1
-    ]
-    return canvas.create_polygon(pts, **kwargs, smooth=True)
+@dataclass
+class PilRectConfig:
+    """Configuration for PIL-based rounded rectangle drawing."""
+    width: int
+    height: int
+    radius: int
+    fill: Optional[str]
+    outline: Optional[str]
+    outline_width: int
+    margin: int
+
+def _draw_pil_rounded_rect(cfg: PilRectConfig):
+    """Helper to draw rounded rectangle using PIL."""
+    # Cache key based on dimensions and style
+    cache_key = (
+        cfg.width, cfg.height, cfg.radius, cfg.fill,
+        cfg.outline, cfg.outline_width
+    )
+
+    if cache_key in _RECT_CACHE:
+        tk_img = _RECT_CACHE[cache_key]
+    else:
+        # 2x Oversampling
+        os_factor = 2
+        full_w, full_h = cfg.width + cfg.margin * 2, cfg.height + cfg.margin * 2
+
+        img = Image.new("RGBA", (int(full_w * os_factor), int(full_h * os_factor)), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        # Center-aligned coordinates
+        half_lw = (cfg.outline_width * os_factor) / 2
+        r_left, r_top = cfg.margin * os_factor, cfg.margin * os_factor
+        r_right = (cfg.margin + cfg.width) * os_factor
+        r_bottom = (cfg.margin + cfg.height) * os_factor
+
+        if cfg.fill and cfg.fill != "":
+            draw.rounded_rectangle(
+                [r_left, r_top, r_right, r_bottom],
+                radius=int(cfg.radius * os_factor), fill=cfg.fill, width=0
+            )
+
+        if cfg.outline and cfg.outline != "":
+            # Centered outline: draw slightly outside and inside the boundary
+            draw.rounded_rectangle(
+                [r_left-half_lw, r_top-half_lw, r_right+half_lw, r_bottom+half_lw],
+                radius=int(cfg.radius * os_factor + half_lw),
+                fill=None, outline=cfg.outline, width=int(cfg.outline_width * os_factor)
+            )
+
+        # Sharp resize
+        img = img.resize((full_w, full_h), Image.Resampling.LANCZOS)
+        tk_img = ImageTk.PhotoImage(img)
+        if len(_RECT_CACHE) > 100:
+            _RECT_CACHE.clear()
+        _RECT_CACHE[cache_key] = tk_img
+
+    return tk_img
+
+def _draw_poly_rounded_rect(canvas, coords, radius, **kwargs):
+    """Helper to draw rounded rectangle using polygons."""
+    x1, y1, x2, y2 = coords
+    pts = []
+    steps = 32
+    # Top-right
+    for i in range(steps + 1):
+        ang = math.radians(270 + 90 * i / steps)
+        pts.extend([
+            x2 - radius + radius * math.cos(ang),
+            y1 + radius + radius * math.sin(ang)
+        ])
+    # Bottom-right
+    for i in range(steps + 1):
+        ang = math.radians(0 + 90 * i / steps)
+        pts.extend([
+            x2 - radius + radius * math.cos(ang),
+            y2 - radius + radius * math.sin(ang)
+        ])
+    # Bottom-left
+    for i in range(steps + 1):
+        ang = math.radians(90 + 90 * i / steps)
+        pts.extend([
+            x1 + radius + radius * math.cos(ang),
+            y2 - radius + radius * math.sin(ang)
+        ])
+    # Top-left
+    for i in range(steps + 1):
+        ang = math.radians(180 + 90 * i / steps)
+        pts.extend([
+            x1 + radius + radius * math.cos(ang),
+            y1 + radius + radius * math.sin(ang)
+        ])
+
+    return canvas.create_polygon(pts, smooth=False, **kwargs)
+
+def round_rectangle(canvas, coords, radius=25, use_pil=True, **kwargs):
+    """
+    Draws a high-quality antialiased rounded rectangle.
+    Optimized with caching and 2x oversampling for performance.
+    """
+    coords = [int(v) for v in coords]
+    b = (min(coords[0], coords[2]), max(coords[0], coords[2]),
+         min(coords[1], coords[3]), max(coords[1], coords[3]))
+
+    radius = max(min(radius, (b[1] - b[0]) // 2, (b[3] - b[2]) // 2), 0)
+
+    s = {
+        'fill': kwargs.pop('fill', None),
+        'outline': kwargs.pop('outline', None),
+        'width': kwargs.pop('width', 0),
+        'tags': kwargs.get('tags', [])
+    }
+
+    if (b[1] - b[0]) < 4 or (b[3] - b[2]) < 4:
+        use_pil = False
+
+    if use_pil:
+        try:
+            m = int(s['width'] + 8)
+            tk_img = _draw_pil_rounded_rect(PilRectConfig(
+                width=b[1] - b[0], height=b[3] - b[2], radius=radius,
+                fill=s['fill'], outline=s['outline'],
+                outline_width=s['width'], margin=m
+            ))
+            item = canvas.create_image(
+                b[0] - m, b[2] - m, image=tk_img, anchor="nw", tags=s['tags']
+            )
+            if not hasattr(canvas, "pil_images"):
+                canvas.pil_images = {}
+            canvas.pil_images[item] = tk_img
+            return item
+        except (OSError, ValueError, TypeError, AttributeError, RuntimeError) as exc:
+            debug_print(f"PIL drawing failed: {exc}")
+
+    # Fallback to polygon
+    p_kw = kwargs.copy()
+    for k in ['fill', 'outline', 'width']:
+        if s[k]:
+            p_kw[k] = s[k]
+
+    return _draw_poly_rounded_rect(canvas, b, radius, **p_kw)
 
 def _get_amd_vram():
     """Detects AMD VRAM using sysfs."""
@@ -146,7 +273,6 @@ def _get_amd_vram():
         for card_path in amd_cards:
             try:
                 with open(card_path, 'r', encoding='utf-8') as f:
-                    # Value is in bytes
                     bytes_val = int(f.read().strip())
                     vram_mb += bytes_val // (1024 * 1024)
             except (ValueError, IOError):

@@ -1,7 +1,6 @@
 """
 Unit tests for the MarkdownEngine class.
 """
-import tkinter as tk
 import unittest
 from unittest.mock import MagicMock, patch
 from markdown_engine import MarkdownEngine
@@ -10,12 +9,13 @@ class TestMarkdownEngine(unittest.TestCase):
     """Test suite for MarkdownEngine."""
 
     def setUp(self):
-        self.mock_text = MagicMock(spec=tk.Text)
-        self.mock_tooltip = MagicMock()
-        self.mock_text.index.return_value = "1.0"
-        self.mock_text.get.return_value = ""
-        self.mock_text.winfo_width.return_value = 800
-        self.engine = MarkdownEngine(self.mock_text, self.mock_tooltip)
+        with patch('tkinter.Text'), patch('PIL.ImageTk.PhotoImage'):
+            self.mock_text = MagicMock()
+            self.mock_tooltip = MagicMock()
+            self.mock_text.index.return_value = "1.0"
+            self.mock_text.get.return_value = ""
+            self.mock_text.winfo_width.return_value = 800
+            self.engine = MarkdownEngine(self.mock_text, self.mock_tooltip)
 
     def test_render_text(self):
         """Test rendering plain text."""

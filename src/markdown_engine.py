@@ -11,9 +11,10 @@ class MarkdownEngine:
     """
     Renders a stream of Markdown tokens into a Tkinter Text widget.
     """
-    def __init__(self, text_widget, tooltip_callback):
+    def __init__(self, text_widget, tooltip_callback, scale=1.0):
         self._text_widget = None
         self.tooltip_callback = tooltip_callback
+        self.scale = scale
         self.fonts = Theme.get_fonts()
         self.url_map = {} # Maps tag names to URLs
 
@@ -187,6 +188,8 @@ class MarkdownEngine:
     def _handle_block_code(self, token, base_tag, style_tags, level):
         """Renders a block_code token with a copy button in header and footer."""
         del style_tags, level
+        def s(v):
+            return int(v * self.scale)
         code_content = token.get('raw', '')
         lang = token.get('attrs', {}).get('info', '')
 
@@ -215,12 +218,12 @@ class MarkdownEngine:
             if lang:
                 tk.Label(
                     frame, text=lang.upper(), font=self.fonts["unit"],
-                    bg=Theme.CODE_BG, fg=Theme.SYSTEM_COLOR, padx=8, pady=2
+                    bg=Theme.CODE_BG, fg=Theme.SYSTEM_COLOR, padx=s(8), pady=s(2)
                 ).pack(side="left")
 
             copy_lbl = tk.Label(
                 frame, text="Copy", font=self.fonts["unit"],
-                bg=Theme.CODE_BG, fg=Theme.LINK_COLOR, cursor="hand2", padx=8, pady=2
+                bg=Theme.CODE_BG, fg=Theme.LINK_COLOR, cursor="hand2", padx=s(8), pady=s(2)
             )
             copy_lbl.bind("<Button-1>", do_copy)
             copy_lbl.pack(side="right")
@@ -259,12 +262,14 @@ class MarkdownEngine:
     def _handle_thematic_break(self, token, base_tag, style_tags, level):
         """Renders a thick horizontal rule."""
         del token, base_tag, style_tags, level
-        width = max(400, self.text_widget.winfo_width() - 60)
+        def s(v):
+            return int(v * self.scale)
+        width = max(400, self.text_widget.winfo_width() - s(60))
         canv = tk.Canvas(
-            self.text_widget, bg=Theme.BG_COLOR, height=6,
+            self.text_widget, bg=Theme.BG_COLOR, height=s(6),
             highlightthickness=0, width=width
         )
-        canv.create_line(0, 3, width, 3, fill=Theme.ACCENT_COLOR, width=4)
+        canv.create_line(0, s(3), width, s(3), fill=Theme.ACCENT_COLOR, width=s(4))
         self._bind_scroll(canv)
         self.text_widget.insert("end-1c", "\n")
         self.text_widget.window_create("end-1c", window=canv)
@@ -335,11 +340,13 @@ class MarkdownEngine:
 
     def _render_table_content(self, frame, header_cells, rows):
         """Helper to render headers and rows into the frame."""
+        def s(v):
+            return int(v * self.scale)
         for j, val in enumerate(header_cells):
             lbl = tk.Label(
                 frame, text=val, font=self.fonts["bold"],
                 bg=Theme.BG_COLOR, fg=Theme.FG_COLOR,
-                padx=10, pady=5, relief="flat", anchor="w",
+                padx=s(10), pady=s(5), relief="flat", anchor="w",
                 highlightthickness=1, highlightbackground=Theme.ACCENT_COLOR
             )
             lbl.grid(row=0, column=j, sticky="nsew")
@@ -349,7 +356,7 @@ class MarkdownEngine:
                 lbl = tk.Label(
                     frame, text=val, font=self.fonts["base"],
                     bg=Theme.BG_COLOR, fg=Theme.FG_COLOR,
-                    padx=10, pady=5, relief="flat", anchor="w",
+                    padx=s(10), pady=s(5), relief="flat", anchor="w",
                     highlightthickness=1,
                     highlightbackground=Theme.ACCENT_COLOR
                 )

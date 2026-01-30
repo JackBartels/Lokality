@@ -25,6 +25,23 @@ class BaseAssistantTest(unittest.TestCase):
         self.patchers['client'] = patch('local_assistant.get_ollama_client')
         self.mocks['get_client'] = self.patchers['client'].start()
         self.mocks['client'] = self.mocks['get_client'].return_value
+
+        # Default behavior for chat/generate to handle streaming
+        def mock_chat(*_, **kwargs):
+            rv = self.mocks['client'].chat.return_value
+            if kwargs.get('stream'):
+                return [rv]
+            return rv
+
+        def mock_generate(*_, **kwargs):
+            rv = self.mocks['client'].generate.return_value
+            if kwargs.get('stream'):
+                return [rv]
+            return rv
+
+        self.mocks['client'].chat.side_effect = mock_chat
+        self.mocks['client'].generate.side_effect = mock_generate
+
         # Also patch it in other modules just in case
         self.patchers['client_mm'] = patch(
             'memory_manager.get_ollama_client', new=self.mocks['get_client']

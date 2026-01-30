@@ -9,6 +9,7 @@ import threading
 import time
 
 from utils import debug_print, error_print
+from logger import logger
 
 def retry_on_busy(max_retries=5, delay=0.1):
     """Decorator to retry a database operation if it is locked."""
@@ -31,8 +32,16 @@ def retry_on_busy(max_retries=5, delay=0.1):
 
 class MemoryStore:
     """
-    Interfaces with the SQLite memory database.
+    Manages the long-term memory database for Lokality.
+    Uses SQLite with FTS5 for high-performance keyword search.
     """
+    STOP_WORDS = {
+        "the", "and", "you", "that", "was", "for", "are", "with",
+        "his", "they", "this", "have", "from", "what", "where", "when",
+        "how", "who", "tell", "know", "about", "could", "would", "should"
+    }
+    IDENTITY_KEYWORDS = {"i", "me", "my", "mine", "am"}
+
     def __init__(self, db_path=None):
         if db_path is None:
             # Use absolute path based on project root
@@ -184,18 +193,20 @@ class MemoryStore:
             return []
 
     def _search_keyword_facts(self, query):
-        """Retrieves facts matching keywords from the query."""
-        stop_words = {
-            "the", "and", "you", "that", "was", "for", "are", "with",
-            "his", "they", "this", "have", "from"
-        }
-        clean_q = re.sub(r'[^a-z0-9\s]', '', query.lower())
+        """Retrieves facts matching keywords from the query using FTS5."""
+        # Clean query and extract keywords
+        clean_q = re.sub(r'[^a-z0-9\s]', ' ', query.lower())
+        raw_words = clean_q.split()
+
+        # Identity mapping for personal pronouns
+        has_id = any(w in self.IDENTITY_KEYWORDS for w in raw_words)
+
         keywords = [
-            k for k in clean_q.split()
-            if len(k) >= 3 and k not in stop_words
+            w for w in raw_words
+            if len(w) >= 3 and w not in self.STOP_WORDS
         ]
-        if any(k in ["i", "me", "my", "mine", "who", "am"]
-               for k in query.lower().split()):
+
+        if has_id and "user" not in keywords:
             keywords.append("user")
 
         if not keywords:
@@ -203,43 +214,71 @@ class MemoryStore:
 
         try:
             conn = self._get_conn()
+            # Prepare FTS5 query with prefix matching for flexibility
+            fts_query = " OR ".join([f'"{k}"*' for k in keywords])
+
             try:
+                # Rank by relevance (BM25) and recency
                 cursor = conn.execute(
-                    "SELECT entity, fact, id FROM memory_fts "
-                    "WHERE memory_fts MATCH ? ORDER BY rank LIMIT 10",
-                    (" OR ".join(keywords),)
+                    "SELECT entity, fact, rowid as id FROM memory_fts "
+                    "WHERE memory_fts MATCH ? ORDER BY rank LIMIT 12",
+                    (fts_query,)
                 )
-            except sqlite3.Error:
-                clause = " OR ".join(
-                    ["fact LIKE ? OR entity LIKE ?" for _ in keywords]
-                )
-                params = [f"%{k}%" for k in keywords for _ in (0, 1)]
+            except sqlite3.Error as fts_err:
+                debug_print(f"[*] Memory: FTS5 query failed, fallback to LIKE: {fts_err}")
+                clause = " OR ".join(["fact LIKE ? OR entity LIKE ?" for _ in keywords])
+                params = []
+                for k in keywords:
+                    params.extend([f"%{k}%", f"%{k}%"])
+
                 cursor = conn.execute(
                     f"SELECT entity, fact, id FROM memory "
                     f"WHERE {clause} ORDER BY created_at DESC LIMIT 10",
                     params
                 )
-            return [
+
+            results = [
                 {"id": r['id'], "entity": r['entity'], "fact": r['fact']}
                 for r in cursor.fetchall()
             ]
-        except sqlite3.Error:
+            debug_print(f"[*] Memory: Retrieved {len(results)} matches for: {keywords}")
+            return results
+        except sqlite3.Error as exc:
+            debug_print(f"[*] Memory: Database error during search: {exc}")
             return []
 
     @retry_on_busy()
     def get_relevant_facts(self, query):
         """Retrieves identity facts and query-relevant facts."""
-        all_facts = self._get_identity_facts()
-        if query:
-            all_facts.extend(self._search_keyword_facts(query))
+        # 1. Identity facts are the "baseline" context
+        unique_facts = self._get_identity_facts()
 
-        seen, unique = set(), []
-        for fact in all_facts:
-            key = (fact['entity'].lower(), fact['fact'].lower())
-            if key not in seen:
-                unique.append(fact)
-                seen.add(key)
-        return unique[:20]
+        # 2. Add keyword matches
+        if query:
+            keyword_matches = self._search_keyword_facts(query)
+            unique_facts.extend(keyword_matches)
+
+        # 3. Deduplicate based on content while preserving order (identity first)
+        seen = set()
+        final_facts = []
+        for fact in unique_facts:
+            # Normalize for deduplication
+            content_key = (fact['entity'].lower().strip(), fact['fact'].lower().strip())
+            if content_key not in seen:
+                final_facts.append(fact)
+                seen.add(content_key)
+
+        # Log for debugging
+        if final_facts:
+            entities = ", ".join(set(f['entity'] for f in final_facts))
+            debug_print(
+                f"[*] Memory: Final context set contains {len(final_facts)} "
+                f"facts about: {entities}"
+            )
+            for f in final_facts:
+                logger.debug("Context Fact: [%s] %s", f['entity'], f['fact'])
+
+        return final_facts[:20]
 
     @retry_on_busy()
     def add_fact(self, entity, fact):
@@ -280,6 +319,44 @@ class MemoryStore:
         except sqlite3.Error as exc:
             debug_print(f"[*] Memory: Failed to update fact: {exc}")
 
+    @retry_on_busy()
+    def get_fact_count(self):
+        """Returns the total number of facts in the memory."""
+        try:
+            conn = self._get_conn()
+            with self._lock:
+                cursor = conn.execute("SELECT COUNT(*) FROM memory")
+                return cursor.fetchone()[0]
+        except sqlite3.Error as exc:
+            debug_print(f"[*] Memory: Error counting facts: {exc}")
+            return 0
+
+    def has_similar_fact(self, entity, fact_text):
+        """Checks if a very similar fact already exists for this entity."""
+        try:
+            conn = self._get_conn()
+            # Normalize for comparison
+            norm_fact = re.sub(r'[^a-z0-9]', '', fact_text.lower())
+
+            # Fetch all facts for this entity (usually small count)
+            cursor = conn.execute(
+                "SELECT fact FROM memory WHERE LOWER(entity) = LOWER(?)",
+                (entity,)
+            )
+            for row in cursor.fetchall():
+                existing_norm = re.sub(r'[^a-z0-9]', '', row['fact'].lower())
+                # Exact or extremely similar
+                if norm_fact == existing_norm:
+                    return True
+                # Check for containment (e.g. "Lives in Paris" vs "He lives in Paris")
+                if len(norm_fact) > 10 and (
+                    norm_fact in existing_norm or existing_norm in norm_fact
+                ):
+                    return True
+            return False
+        except sqlite3.Error:
+            return False
+
     def clear(self):
         """Deletes the database files and re-initializes."""
         try:
@@ -302,15 +379,3 @@ class MemoryStore:
                 pass
 
         self._init_db()
-
-    @retry_on_busy()
-    def get_fact_count(self):
-        """Returns the total number of facts in the memory."""
-        try:
-            conn = self._get_conn()
-            with self._lock:
-                cursor = conn.execute("SELECT COUNT(*) FROM memory")
-                return cursor.fetchone()[0]
-        except sqlite3.Error as exc:
-            debug_print(f"[*] Memory: Error counting facts: {exc}")
-            return 0

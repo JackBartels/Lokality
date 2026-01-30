@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import Optional, Any
 import config
 from ui_components import InfoPanel
-from ui_helpers import CustomScrollbar
 
 @dataclass
 class IndicatorState:
@@ -36,13 +35,14 @@ class UIState:
     show_info: bool = False
     sidebar_visible: bool = False
     show_profiler: bool = False
+    auto_scroll: bool = True
+    ui_scale: float = 1.0
 
 @dataclass
 class AppState:
     """Holds the application state."""
     assistant: Optional[Any] = None
     process: ProcessState = field(default_factory=ProcessState)
-    auto_scroll: bool = True
     response: ResponseState = field(default_factory=ResponseState)
     ui_state: UIState = field(default_factory=UIState)
     msg_queue: queue.Queue = field(default_factory=queue.Queue)
@@ -56,7 +56,7 @@ class ChatUI:
     inner: Optional[tk.Frame] = None
     window_id: Optional[int] = None
     display: Optional[tk.Text] = None
-    scrollbar: Optional[CustomScrollbar] = None
+    scrollbar: Optional[Any] = None
     jump_btn_canvas: Optional[tk.Canvas] = None
 
 @dataclass
@@ -77,13 +77,27 @@ class SidebarUI:
     window_id: Optional[int] = None
 
 @dataclass
+class PanelsUI:
+    """Holds panel UI component references."""
+    info: Optional[InfoPanel] = None
+    profiler: Optional[Any] = None
+
+@dataclass
+class MarkdownUI:
+    """Holds markdown related UI components."""
+    engine: Optional[Any] = None
+    parser: Optional[Any] = None
+
+@dataclass
 class AppUI:
     """Holds UI component references."""
     chat: ChatUI = field(default_factory=ChatUI)
     input: InputUI = field(default_factory=InputUI)
-    info_panel: Optional[InfoPanel] = None
     sidebar: SidebarUI = field(default_factory=SidebarUI)
+    panels: PanelsUI = field(default_factory=PanelsUI)
+    markdown: MarkdownUI = field(default_factory=MarkdownUI)
     tooltip_window: Optional[tk.Toplevel] = None
+    icon_img: Optional[Any] = None
 
 SLASH_COMMANDS = [
     ["/bypass", "Send raw prompt directly to model"],
