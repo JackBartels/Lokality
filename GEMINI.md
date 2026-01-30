@@ -23,6 +23,8 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 - **Smart Input**: A minimalist input box that expands vertically up to 8 lines with visual line detection.
 - **Responsive Layout**: Modular components using `grid` and `pack` with automatic resizing and rounded containers.
 - **Jump to Latest**: A floating button appears when scrolling away from the bottom to allow quick navigation back to the latest messages.
+- **UI Scaling**: Automatic DPI-aware scaling ensures the interface remains sharp and appropriately sized on all monitors.
+- **Interruptible Generation**: Dedicated Esc-key handling allows users to immediately halt LLM responses or active search operations.
 - **Rich Text Rendering**: `MarkdownEngine` handles headings, nested lists, blockquotes, tables, and links.
 - **Interactive Code Blocks**: Code blocks include a header with the language name and a "Copy" button for easy interaction.
 
@@ -49,6 +51,11 @@ A Python-based GUI chat assistant powered by Ollama and real-time DuckDuckGo sea
 - **Hardware-Aware Initialization**: Auto-pulls the largest suitable Gemma 3 model based on available VRAM (supporting NVIDIA, AMD, and Intel).
 - **Live Stats**: `StatsCollector` tracks real-time RAM/VRAM usage and context consumption.
 - **State Preservation**: Persistent settings (`res/settings.json`) store UI toggles and selected models across sessions.
+
+### 6. Safety & Crisis Response
+- **Mandatory Protocol**: A specialized safety layer detects crisis situations and prioritizes professional resources over general conversation.
+- **Search Gatekeeping**: Automatically skips external web searches when safety disclaimers and emergency contacts are required.
+- **Integrated Disclaimers**: Professional advice disclaimers are contextually injected to ensure user safety.
 
 ## Project Structure
 
